@@ -1,11 +1,11 @@
 const CACHE_NAME = 'linkbox-admin-v1';
 const ASSETS = [
-  '/',
-  '/index.html',
-  '/app.js',
-  '/style.css',
-  '/manifest.json',
-  '/icon-512.png'
+  './',
+  './index.html',
+  './app.js',
+  './style.css',
+  './manifest.json',
+  './icon-512.png'
 ];
 
 self.addEventListener('install', (e) => {
