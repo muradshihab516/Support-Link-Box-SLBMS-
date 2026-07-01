@@ -1,0 +1,3161 @@
+// Support Link Box - Core Administration Engine (Vanilla JS Edition)
+// High-performance client-side state machine with localStorage persistence
+
+const ADMIN_NAMES = {
+  'shihab@linkbox.com': 'Md Shihab Khan',
+  'mamun@linkbox.com': 'Mamun Aravi',
+  'shuvo@linkbox.com': 'Shuvo Sutradhar',
+  'shadat@linkbox.com': 'ShaDat Hossain',
+  'rubel@linkbox.com': 'Ariyan Ahmed Rubel',
+  'hanif@linkbox.com': 'Mohammad Abu Hanif'
+};
+
+const INITIAL_MEMBERS_DATA = [];
+
+function getPastDateString(daysAgo) {
+  const date = new Date();
+  date.setDate(date.getDate() - daysAgo);
+  return date.toISOString().split('T')[0];
+}
+
+const STORAGE_KEYS = {
+  MEMBERS: 'support_linkbox_members',
+  LOGS: 'support_linkbox_logs',
+  AUDIT: 'support_linkbox_audit',
+  BADGES: 'support_linkbox_badges',
+  CURRENT_ADMIN: 'support_linkbox_current_admin',
+  SUPABASE_URL: 'support_linkbox_supabase_url',
+  SUPABASE_KEY: 'support_linkbox_supabase_key',
+  SUPABASE_SYNC_ENABLED: 'support_linkbox_supabase_sync_enabled'
+};
+
+// Supabase client and sync helpers
+export function getSupabase() {
+  const url = localStorage.getItem(STORAGE_KEYS.SUPABASE_URL) || (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_URL) || 'https://ngakeapuvnwfvfoqvidc.supabase.co';
+  const key = localStorage.getItem(STORAGE_KEYS.SUPABASE_KEY) || (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_KEY) || 'sb_publishable_UKs0BaYRcXvHCVwsi1ZeNA_UyNbWLWC';
+  if (!url || !key) return null;
+  if (!window.supabase) {
+    console.warn('Supabase JS library CDN is not loaded yet.');
+    return null;
+  }
+  try {
+    return window.supabase.createClient(url, key);
+  } catch (err) {
+    console.error('Failed to instantiate Supabase client:', err);
+    return null;
+  }
+}
+
+export async function testSupabaseConnection() {
+  const client = getSupabase();
+  if (!client) {
+    updateState({ supabaseConnectionStatus: 'not_configured', supabaseConnectionError: '' });
+    return false;
+  }
+  updateState({ supabaseConnectionStatus: 'connecting', supabaseConnectionError: '' });
+  try {
+    const { error } = await client.from('members').select('id').limit(1);
+    if (error) throw error;
+    updateState({ supabaseConnectionStatus: 'connected', supabaseConnectionError: '' });
+    return true;
+  } catch (err) {
+    console.error('Supabase Connection Test Error:', err);
+    updateState({ 
+      supabaseConnectionStatus: 'error', 
+      supabaseConnectionError: err.message || err.details || 'Connection failed' 
+    });
+    return false;
+  }
+}
+
+export async function pushToSupabase() {
+  const client = getSupabase();
+  if (!client) {
+    showToast('অনুগ্রহ করে প্রথমে Supabase URL এবং Key সেট আপ করুন!', 'error');
+    return false;
+  }
+  updateState({ supabaseSyncing: true });
+  try {
+    const members = getMembers();
+    const logs = getActivityLogs();
+    const badges = getBadges();
+    const auditTrails = getAuditTrails();
+
+    // Sync Members
+    if (members.length > 0) {
+      const { error: mErr } = await client.from('members').upsert(members);
+      if (mErr) throw new Error(`Members Sync Error: ${mErr.message}`);
+    }
+    // Sync Logs
+    if (logs.length > 0) {
+      const { error: lErr } = await client.from('activity_logs').upsert(logs);
+      if (lErr) throw new Error(`Logs Sync Error: ${lErr.message}`);
+    }
+    // Sync Badges
+    if (badges.length > 0) {
+      const { error: bErr } = await client.from('badges').upsert(badges);
+      if (bErr) throw new Error(`Badges Sync Error: ${bErr.message}`);
+    }
+    // Sync Audit
+    if (auditTrails.length > 0) {
+      const { error: aErr } = await client.from('audit_trails').upsert(auditTrails);
+      if (aErr) throw new Error(`Audit Sync Error: ${aErr.message}`);
+    }
+
+    updateState({ supabaseSyncing: false, supabaseConnectionStatus: 'connected', supabaseConnectionError: '' });
+    showToast('অভিনন্দন! লোকাল ব্রাউজারের সমস্ত মেম্বার এবং অ্যাক্টিভিটি ডাটা সফলভাবে Supabase ক্লাউডে আপলোড (Push) করা হয়েছে!', 'success');
+    return true;
+  } catch (err) {
+    console.error(err);
+    updateState({ supabaseSyncing: false, supabaseConnectionStatus: 'error', supabaseConnectionError: err.message });
+    showToast(`ডাটা আপলোড করতে সমস্যা হয়েছে: ${err.message}`, 'error');
+    return false;
+  }
+}
+
+export async function pullFromSupabase() {
+  const client = getSupabase();
+  if (!client) {
+    showToast('অনুগ্রহ করে প্রথমে Supabase URL এবং Key সেট আপ করুন!', 'error');
+    return false;
+  }
+  updateState({ supabaseSyncing: true });
+  try {
+    // Pull members
+    const { data: remoteMembers, error: mErr } = await client.from('members').select('*').order('member_number', { ascending: true });
+    if (mErr) throw new Error(`Members Pull Error: ${mErr.message}`);
+
+    // Pull logs
+    const { data: remoteLogs, error: lErr } = await client.from('activity_logs').select('*');
+    if (lErr) throw new Error(`Logs Pull Error: ${lErr.message}`);
+
+    // Pull badges
+    const { data: remoteBadges, error: bErr } = await client.from('badges').select('*');
+    if (bErr) throw new Error(`Badges Pull Error: ${bErr.message}`);
+
+    // Pull audit
+    const { data: remoteAudits, error: aErr } = await client.from('audit_trails').select('*').order('timestamp', { ascending: false });
+    if (aErr) throw new Error(`Audits Pull Error: ${aErr.message}`);
+
+    // Smart merge with local storage data to prevent wiping out local unsynced registrations
+    const localMembers = JSON.parse(localStorage.getItem(STORAGE_KEYS.MEMBERS) || '[]');
+    const localLogs = JSON.parse(localStorage.getItem(STORAGE_KEYS.LOGS) || '[]');
+    const localBadges = JSON.parse(localStorage.getItem(STORAGE_KEYS.BADGES) || '[]');
+    const localAudits = JSON.parse(localStorage.getItem(STORAGE_KEYS.AUDIT) || '[]');
+
+    // Merge members
+    const remoteMemberIds = new Set((remoteMembers || []).map(m => m.id));
+    const unsyncedMembers = localMembers.filter(m => m && m.id && !remoteMemberIds.has(m.id));
+    const mergedMembers = [...(remoteMembers || []), ...unsyncedMembers];
+
+    // Merge logs
+    const remoteLogIds = new Set((remoteLogs || []).map(l => l.id));
+    const unsyncedLogs = localLogs.filter(l => l && l.id && !remoteLogIds.has(l.id));
+    const mergedLogs = [...(remoteLogs || []), ...unsyncedLogs];
+
+    // Merge badges
+    const remoteBadgeIds = new Set((remoteBadges || []).map(b => b.id));
+    const unsyncedBadges = localBadges.filter(b => b && b.id && !remoteBadgeIds.has(b.id));
+    const mergedBadges = [...(remoteBadges || []), ...unsyncedBadges];
+
+    // Merge audits
+    const remoteAuditIds = new Set((remoteAudits || []).map(a => a.id));
+    const unsyncedAudits = localAudits.filter(a => a && a.id && !remoteAuditIds.has(a.id));
+    const mergedAudits = [...(remoteAudits || []), ...unsyncedAudits];
+
+    // Save back to local storage (which will trigger standard sync-back of newly merged unsynced records)
+    saveMembers(mergedMembers);
+    saveActivityLogs(mergedLogs);
+    saveBadges(mergedBadges);
+    saveAuditTrails(mergedAudits);
+
+    loadStateFromStorage();
+    updateState({ supabaseSyncing: false, supabaseConnectionStatus: 'connected', supabaseConnectionError: '' });
+    showToast('অভিনন্দন! Supabase ক্লাউড থেকে রেকর্ড এবং লোকাল রেকর্ড সফলভাবে মার্জ (Merge) করা হয়েছে!', 'success');
+    return true;
+  } catch (err) {
+    console.error(err);
+    updateState({ supabaseSyncing: false, supabaseConnectionStatus: 'error', supabaseConnectionError: err.message });
+    showToast(`ডাটা ডাউনলোড করতে সমস্যা হয়েছে: ${err.message}`, 'error');
+    return false;
+  }
+}
+
+export async function silentPullFromSupabase() {
+  const client = getSupabase();
+  if (!client) return false;
+  // If sync is explicitly disabled, skip background pull
+  if (localStorage.getItem(STORAGE_KEYS.SUPABASE_SYNC_ENABLED) === 'false') return false;
+
+  try {
+    // Pull members
+    const { data: remoteMembers, error: mErr } = await client.from('members').select('*').order('member_number', { ascending: true });
+    if (mErr) throw new Error(`Members Pull Error: ${mErr.message}`);
+
+    // Pull logs
+    const { data: remoteLogs, error: lErr } = await client.from('activity_logs').select('*');
+    if (lErr) throw new Error(`Logs Pull Error: ${lErr.message}`);
+
+    // Pull badges
+    const { data: remoteBadges, error: bErr } = await client.from('badges').select('*');
+    if (bErr) throw new Error(`Badges Pull Error: ${bErr.message}`);
+
+    // Pull audit
+    const { data: remoteAudits, error: aErr } = await client.from('audit_trails').select('*').order('timestamp', { ascending: false });
+    if (aErr) throw new Error(`Audits Pull Error: ${aErr.message}`);
+
+    // Smart merge with local storage data to prevent wiping out local unsynced registrations
+    const localMembers = JSON.parse(localStorage.getItem(STORAGE_KEYS.MEMBERS) || '[]');
+    const localLogs = JSON.parse(localStorage.getItem(STORAGE_KEYS.LOGS) || '[]');
+    const localBadges = JSON.parse(localStorage.getItem(STORAGE_KEYS.BADGES) || '[]');
+    const localAudits = JSON.parse(localStorage.getItem(STORAGE_KEYS.AUDIT) || '[]');
+
+    // Merge members
+    const remoteMemberIds = new Set((remoteMembers || []).map(m => m.id));
+    const unsyncedMembers = localMembers.filter(m => m && m.id && !remoteMemberIds.has(m.id));
+    const mergedMembers = [...(remoteMembers || []), ...unsyncedMembers];
+
+    // Merge logs
+    const remoteLogIds = new Set((remoteLogs || []).map(l => l.id));
+    const unsyncedLogs = localLogs.filter(l => l && l.id && !remoteLogIds.has(l.id));
+    const mergedLogs = [...(remoteLogs || []), ...unsyncedLogs];
+
+    // Merge badges
+    const remoteBadgeIds = new Set((remoteBadges || []).map(b => b.id));
+    const unsyncedBadges = localBadges.filter(b => b && b.id && !remoteBadgeIds.has(b.id));
+    const mergedBadges = [...(remoteBadges || []), ...unsyncedBadges];
+
+    // Merge audits
+    const remoteAuditIds = new Set((remoteAudits || []).map(a => a.id));
+    const unsyncedAudits = localAudits.filter(a => a && a.id && !remoteAuditIds.has(a.id));
+    const mergedAudits = [...(remoteAudits || []), ...unsyncedAudits];
+
+    // Save directly to localStorage to avoid trigger-happy sync loop calls
+    localStorage.setItem(STORAGE_KEYS.MEMBERS, JSON.stringify(mergedMembers));
+    localStorage.setItem(STORAGE_KEYS.LOGS, JSON.stringify(mergedLogs));
+    localStorage.setItem(STORAGE_KEYS.BADGES, JSON.stringify(mergedBadges));
+    localStorage.setItem(STORAGE_KEYS.AUDIT, JSON.stringify(mergedAudits));
+
+    // Reload state and trigger UI render
+    state.members = mergedMembers;
+    state.auditTrails = mergedAudits;
+    updateState({});
+
+    // If there were any unsynced records, upload them silently to keep Supabase in sync
+    if (unsyncedMembers.length > 0) {
+      syncMultipleRecords('members', unsyncedMembers);
+    }
+    if (unsyncedLogs.length > 0) {
+      syncMultipleRecords('activity_logs', unsyncedLogs);
+    }
+    if (unsyncedBadges.length > 0) {
+      syncMultipleRecords('badges', unsyncedBadges);
+    }
+    if (unsyncedAudits.length > 0) {
+      syncMultipleRecords('audit_trails', unsyncedAudits);
+    }
+
+    console.log('Background silent sync (Pull + Smart Merge) completed successfully!');
+    return true;
+  } catch (err) {
+    console.warn('Background silent sync pull failed:', err);
+    return false;
+  }
+}
+
+// Background auto-sync if enabled
+export async function syncSingleRecord(tableName, record) {
+  if (localStorage.getItem(STORAGE_KEYS.SUPABASE_SYNC_ENABLED) === 'false') return;
+  const client = getSupabase();
+  if (!client) return;
+  try {
+    await client.from(tableName).upsert([record]);
+  } catch (e) {
+    console.error(`Auto-sync failed for ${tableName}:`, e);
+  }
+}
+
+export async function syncMultipleRecords(tableName, records) {
+  if (localStorage.getItem(STORAGE_KEYS.SUPABASE_SYNC_ENABLED) === 'false') return;
+  const client = getSupabase();
+  if (!client) return;
+  try {
+    await client.from(tableName).upsert(records);
+  } catch (e) {
+    console.error(`Auto-sync failed for bulk ${tableName}:`, e);
+  }
+}
+
+// Database Initializer
+export function initializeDatabase() {
+  // Purge legacy demo data if detected to ensure a completely clean start
+  try {
+    const existingMembers = JSON.parse(localStorage.getItem(STORAGE_KEYS.MEMBERS) || '[]');
+    const hasLegacyDemo = Array.isArray(existingMembers) && existingMembers.some(m => 
+      m && (m.name === 'Rahi Ahmed Rabiul' || m.name === 'HM Jakaria Ahmed' || m.id === 'member-1')
+    );
+    if (hasLegacyDemo) {
+      localStorage.removeItem(STORAGE_KEYS.MEMBERS);
+      localStorage.removeItem(STORAGE_KEYS.LOGS);
+      localStorage.removeItem(STORAGE_KEYS.AUDIT);
+      localStorage.removeItem(STORAGE_KEYS.BADGES);
+      console.log('Legacy demo database detected and successfully purged.');
+    }
+  } catch (e) {
+    console.error('Error checking or purging legacy demo database:', e);
+  }
+
+  if (!localStorage.getItem(STORAGE_KEYS.MEMBERS)) {
+    localStorage.setItem(STORAGE_KEYS.MEMBERS, JSON.stringify([]));
+    localStorage.setItem(STORAGE_KEYS.LOGS, JSON.stringify([]));
+
+    // Generate audits
+    const audit = [{
+      id: 'audit-initial',
+      admin_email: 'shihab@linkbox.com',
+      admin_name: 'Md Shihab Khan',
+      action: 'INITIALIZE',
+      entity_type: 'DATABASE',
+      description: 'System database initialized with clean empty state.',
+      timestamp: new Date().toISOString()
+    }];
+    localStorage.setItem(STORAGE_KEYS.AUDIT, JSON.stringify(audit));
+    localStorage.setItem(STORAGE_KEYS.BADGES, JSON.stringify([]));
+  }
+}
+
+// Getters and Setters
+export function getMembers() {
+  initializeDatabase();
+  return JSON.parse(localStorage.getItem(STORAGE_KEYS.MEMBERS) || '[]');
+}
+
+export function saveMembers(members) {
+  localStorage.setItem(STORAGE_KEYS.MEMBERS, JSON.stringify(members));
+  syncMultipleRecords('members', members);
+}
+
+export function getActivityLogs() {
+  return JSON.parse(localStorage.getItem(STORAGE_KEYS.LOGS) || '[]');
+}
+
+export function saveActivityLogs(logs) {
+  localStorage.setItem(STORAGE_KEYS.LOGS, JSON.stringify(logs));
+  syncMultipleRecords('activity_logs', logs);
+}
+
+export function getAuditTrails() {
+  return JSON.parse(localStorage.getItem(STORAGE_KEYS.AUDIT) || '[]');
+}
+
+export function saveAuditTrails(trails) {
+  localStorage.setItem(STORAGE_KEYS.AUDIT, JSON.stringify(trails));
+  syncMultipleRecords('audit_trails', trails);
+}
+
+export function getBadges() {
+  return JSON.parse(localStorage.getItem(STORAGE_KEYS.BADGES) || '[]');
+}
+
+export function saveBadges(badges) {
+  localStorage.setItem(STORAGE_KEYS.BADGES, JSON.stringify(badges));
+  syncMultipleRecords('badges', badges);
+}
+
+export function getCurrentAdmin() {
+  return localStorage.getItem(STORAGE_KEYS.CURRENT_ADMIN) || 'shihab@linkbox.com';
+}
+
+export function setCurrentAdmin(email) {
+  localStorage.setItem(STORAGE_KEYS.CURRENT_ADMIN, email);
+}
+
+// Clean and parse names
+export function cleanName(name) {
+  return name.replace(/^@/, '').trim().replace(/\s+/g, ' ');
+}
+
+// PWA Installer global state
+let deferredPrompt = null;
+
+// State Machine
+let state = {
+  currentTab: 'members',
+  currentAdminEmail: getCurrentAdmin(),
+  members: [],
+  auditTrails: [],
+  searchQueryMembers: '',
+  memberFilterStatus: 'all',
+  editingNotesMemberId: null,
+  editingNotesText: '',
+  bulkInputText: '',
+  bulkInputDate: new Date().toISOString().split('T')[0],
+  noticeFilterDays: 3,
+  copiedNotice: false,
+  leaderboardSearchQuery: '',
+  leaderboardActiveThreshold: 1,
+  leaderboardInactiveThreshold: 3,
+  reportSearchQuery: '',
+  reportSelectedMemberId: '',
+  isDownloadingReport: false,
+  copiedSQL: false,
+  copiedJS: false,
+  generatedPngUrl: '',
+  generatedPngMemberName: '',
+  showPwaInstallBanner: false,
+  showRegisterModal: false,
+  supabaseUrl: localStorage.getItem('support_linkbox_supabase_url') || (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_URL) || 'https://ngakeapuvnwfvfoqvidc.supabase.co',
+  supabaseKey: localStorage.getItem('support_linkbox_supabase_key') || (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_KEY) || 'sb_publishable_UKs0BaYRcXvHCVwsi1ZeNA_UyNbWLWC',
+  supabaseSyncEnabled: localStorage.getItem('support_linkbox_supabase_sync_enabled') !== 'false',
+  supabaseConnectionStatus: 'idle',
+  supabaseConnectionError: '',
+  supabaseSyncing: false,
+  loadedFromEnv: !localStorage.getItem('support_linkbox_supabase_url') && (!!(typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_URL) || true),
+  showUrlInput: false,
+  showKeyInput: false,
+  uncheckedUnregisteredNames: [],
+  developerUnlocked: typeof sessionStorage !== 'undefined' && sessionStorage.getItem('developer_unlocked') === 'true',
+  toast: null
+};
+
+// Auto-extract URL query params and secrets
+export function initSupabaseConfig() {
+  try {
+    const urlObj = new URL(window.location.href);
+    const urlParam = urlObj.searchParams.get('supabase_url') || urlObj.searchParams.get('url');
+    const keyParam = urlObj.searchParams.get('supabase_key') || urlObj.searchParams.get('key');
+    
+    let updated = false;
+    if (urlParam) {
+      localStorage.setItem(STORAGE_KEYS.SUPABASE_URL, urlParam);
+      updated = true;
+    }
+    if (keyParam) {
+      localStorage.setItem(STORAGE_KEYS.SUPABASE_KEY, keyParam);
+      updated = true;
+    }
+    
+    if (updated) {
+      // Clean query params to hide credentials from address bar immediately
+      urlObj.searchParams.delete('supabase_url');
+      urlObj.searchParams.delete('supabase_key');
+      urlObj.searchParams.delete('url');
+      urlObj.searchParams.delete('key');
+      window.history.replaceState({}, document.title, urlObj.pathname + urlObj.search);
+      
+      state.supabaseUrl = localStorage.getItem(STORAGE_KEYS.SUPABASE_URL) || 'https://ngakeapuvnwfvfoqvidc.supabase.co';
+      state.supabaseKey = localStorage.getItem(STORAGE_KEYS.SUPABASE_KEY) || 'sb_publishable_UKs0BaYRcXvHCVwsi1ZeNA_UyNbWLWC';
+      state.loadedFromEnv = false;
+    }
+  } catch (e) {
+    console.error('Error parsing URL query parameters for Supabase configuration:', e);
+  }
+
+  // If no localStorage, fallback to environment secrets or default values
+  if (!state.supabaseUrl) {
+    const envUrl = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_URL) || 'https://ngakeapuvnwfvfoqvidc.supabase.co';
+    if (envUrl) {
+      state.supabaseUrl = envUrl;
+      state.loadedFromEnv = true;
+    }
+  }
+  if (!state.supabaseKey) {
+    const envKey = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_KEY) || 'sb_publishable_UKs0BaYRcXvHCVwsi1ZeNA_UyNbWLWC';
+    if (envKey) {
+      state.supabaseKey = envKey;
+      state.loadedFromEnv = true;
+    }
+  }
+}
+
+// Load initial database records into State
+function loadStateFromStorage() {
+  initializeDatabase();
+  initSupabaseConfig();
+  state.members = getMembers();
+  state.auditTrails = getAuditTrails();
+  state.currentAdminEmail = getCurrentAdmin();
+  
+  if (state.supabaseUrl && state.supabaseKey) {
+    // Non-blocking background check
+    setTimeout(() => {
+      testSupabaseConnection();
+    }, 500);
+  }
+}
+
+// Custom Toast System
+export function showToast(message, type = 'success') {
+  state.toast = { message, type };
+  render();
+  setTimeout(() => {
+    if (state.toast && state.toast.message === message) {
+      state.toast = null;
+      render();
+    }
+  }, 4000);
+}
+
+// Unified State Mutator & Render Trigger
+function updateState(newState) {
+  state = { ...state, ...newState };
+  render();
+}
+
+// Add Member Business Logic
+function handleAddMember(rawName, notes = '') {
+  const cleaned = cleanName(rawName);
+  if (!cleaned) {
+    alert('মেম্বার এর নাম ফাকা হতে পারে না!');
+    return false;
+  }
+
+  const members = getMembers();
+  const duplicate = members.find(m => m.name.toLowerCase() === cleaned.toLowerCase());
+  if (duplicate) {
+    alert(`এই নামের অন্য লোক আছে! অনুগ্রহ করে নামের শেষে '1', '2' বা 'A', 'B' কিছু লাগিয়ে দিন (যেমন: ${cleaned} A)`);
+    return false;
+  }
+
+  const maxMemberNum = members.reduce((max, m) => m.member_number > max ? m.member_number : max, 0);
+  const nextMemberNum = maxMemberNum + 1;
+
+  const newMember = {
+    id: `member-${Math.random().toString(36).substr(2, 9)}`,
+    name: cleaned,
+    display_name: `@${cleaned.replace(/\s+/g, '')}`,
+    member_number: nextMemberNum,
+    status: 'active',
+    level: 'Bronze',
+    total_points: 0,
+    current_streak: 0,
+    longest_streak: 0,
+    total_active_days: 0,
+    last_active_date: null,
+    consecutive_inactive_days: 0,
+    notes,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  };
+
+  members.push(newMember);
+  saveMembers(members);
+
+  // Add audit trail
+  const adminName = ADMIN_NAMES[state.currentAdminEmail] || 'Unknown Admin';
+  const auditTrails = getAuditTrails();
+  auditTrails.unshift({
+    id: `audit-${Date.now()}`,
+    admin_email: state.currentAdminEmail,
+    admin_name: adminName,
+    action: 'ADD_MEMBER',
+    entity_type: 'MEMBER',
+    description: `Registered new member: ${cleaned} (No. ${nextMemberNum})`,
+    timestamp: new Date().toISOString()
+  });
+  saveAuditTrails(auditTrails);
+
+  loadStateFromStorage();
+  updateState({});
+  return true;
+}
+
+// Bulk Add Members Business Logic
+function handleBulkAddMembers(namesList) {
+  if (!Array.isArray(namesList) || namesList.length === 0) return 0;
+  
+  const members = getMembers();
+  const auditTrails = getAuditTrails();
+  const adminName = ADMIN_NAMES[state.currentAdminEmail] || 'Unknown Admin';
+  let successCount = 0;
+  
+  let maxMemberNum = members.reduce((max, m) => m.member_number > max ? m.member_number : max, 0);
+  
+  namesList.forEach(rawName => {
+    const cleaned = cleanName(rawName);
+    if (!cleaned) return;
+    
+    const duplicate = members.find(m => m.name.toLowerCase() === cleaned.toLowerCase());
+    if (duplicate) return;
+    
+    maxMemberNum++;
+    const newMember = {
+      id: `member-${Math.random().toString(36).substr(2, 9)}`,
+      name: cleaned,
+      display_name: `@${cleaned.replace(/\s+/g, '')}`,
+      member_number: maxMemberNum,
+      status: 'active',
+      level: 'Bronze',
+      total_points: 0,
+      current_streak: 0,
+      longest_streak: 0,
+      total_active_days: 0,
+      last_active_date: null,
+      consecutive_inactive_days: 0,
+      notes: '',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+    
+    members.push(newMember);
+    
+    auditTrails.unshift({
+      id: `audit-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      admin_email: state.currentAdminEmail,
+      admin_name: adminName,
+      action: 'ADD_MEMBER',
+      entity_type: 'MEMBER',
+      description: `Registered new member via Bulk: ${cleaned} (No. ${maxMemberNum})`,
+      timestamp: new Date().toISOString()
+    });
+    
+    successCount++;
+  });
+  
+  if (successCount > 0) {
+    saveMembers(members);
+    saveAuditTrails(auditTrails);
+    loadStateFromStorage();
+    updateState({});
+  }
+  
+  return successCount;
+}
+
+// Bulk text mentions extractor
+function parseBulkActivityText(text) {
+  if (!text) return { parsedNames: [], matchedMembers: [], unregisteredNames: [] };
+
+  const parsedNames = [];
+  const regex = /@([^\n\r0-9📅📆✅👇🅾️➤〰️💤⚠️\r\n\t(@]+)/g;
+  let match;
+  while ((match = regex.exec(text)) !== null) {
+    const extracted = match[1].trim();
+    if (extracted && extracted.length > 1) {
+      const cleaned = extracted.replace(/^[➤\s]+/, '').trim();
+      if (cleaned && !parsedNames.includes(cleaned)) {
+        parsedNames.push(cleaned);
+      }
+    }
+  }
+
+  // Fallback split manually if regex matched nothing
+  if (parsedNames.length === 0) {
+    const parts = text.split('@');
+    for (let i = 1; i < parts.length; i++) {
+      const part = parts[i];
+      const namePartMatch = part.match(/^([^0-9📅📆✅👇🅾️➤〰️💤⚠️\r\n\t(@]+)/);
+      if (namePartMatch) {
+        const cleaned = namePartMatch[1].trim();
+        if (cleaned && cleaned.length > 1 && !parsedNames.includes(cleaned)) {
+          parsedNames.push(cleaned);
+        }
+      }
+    }
+  }
+
+  const members = getMembers();
+  const matchedMembers = [];
+  const unregisteredNames = [];
+
+  parsedNames.forEach(rawName => {
+    const cleaned = cleanName(rawName);
+    const match = members.find(m => 
+      m.name.toLowerCase().replace(/\s+/g, '') === cleaned.toLowerCase().replace(/\s+/g, '') ||
+      m.display_name?.toLowerCase().replace(/[@\s]+/g, '') === cleaned.toLowerCase().replace(/\s+/g, '')
+    );
+
+    if (match) {
+      if (!matchedMembers.some(m => m.id === match.id)) {
+        matchedMembers.push(match);
+      }
+    } else {
+      if (!unregisteredNames.includes(cleaned)) {
+        unregisteredNames.push(cleaned);
+      }
+    }
+  });
+
+  return { parsedNames, matchedMembers, unregisteredNames };
+}
+
+// Save Daily Submissions
+function submitBulkActivity(dateStr, activeMemberIds) {
+  const members = getMembers();
+  const logs = getActivityLogs();
+  const badges = getBadges();
+  const auditTrails = getAuditTrails();
+  const adminName = ADMIN_NAMES[state.currentAdminEmail] || 'Unknown Admin';
+
+  const submissionDate = new Date(dateStr);
+  const yesterdayDate = new Date(submissionDate);
+  yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+  const yesterdayStr = yesterdayDate.toISOString().split('T')[0];
+
+  let loggedCount = 0;
+
+  const updatedMembers = members.map(member => {
+    const isActive = activeMemberIds.includes(member.id);
+
+    if (isActive) {
+      logs.push({
+        id: `log-${member.id}-${dateStr}-${Date.now()}`,
+        member_id: member.id,
+        activity_date: dateStr,
+        is_active: true,
+        points_earned: 10,
+        submitted_by: state.currentAdminEmail,
+        created_at: new Date().toISOString()
+      });
+      loggedCount++;
+
+      let currentStreak = member.current_streak;
+      if (member.last_active_date === yesterdayStr) {
+        currentStreak += 1;
+      } else if (member.last_active_date === dateStr) {
+        // Active today, streak stays
+      } else {
+        currentStreak = 1;
+      }
+
+      const longestStreak = Math.max(member.longest_streak, currentStreak);
+      const totalPoints = member.total_points + 10;
+      const totalActiveDays = member.total_active_days + 1;
+
+      let level = 'Bronze';
+      if (totalPoints >= 600) level = 'Diamond';
+      else if (totalPoints >= 300) level = 'Gold';
+      else if (totalPoints >= 100) level = 'Silver';
+
+      const status = 'active';
+
+      // Badge checks
+      if (currentStreak === 3 && !badges.some(b => b.member_id === member.id && b.badge_type === 'streak_3')) {
+        badges.push({ id: `badge-${member.id}-streak3-${Date.now()}`, member_id: member.id, badge_type: 'streak_3', badge_name: '🥉 3-Day Streak Warrior', earned_at: new Date().toISOString() });
+      }
+      if (currentStreak === 7 && !badges.some(b => b.member_id === member.id && b.badge_type === 'streak_7')) {
+        badges.push({ id: `badge-${member.id}-streak7-${Date.now()}`, member_id: member.id, badge_type: 'streak_7', badge_name: '🥈 7-Day Streak Master', earned_at: new Date().toISOString() });
+      }
+      if (currentStreak === 15 && !badges.some(b => b.member_id === member.id && b.badge_type === 'streak_15')) {
+        badges.push({ id: `badge-${member.id}-streak15-${Date.now()}`, member_id: member.id, badge_type: 'streak_15', badge_name: '👑 15-Day Ultimate Streak', earned_at: new Date().toISOString() });
+      }
+      if (totalPoints >= 100 && !badges.some(b => b.member_id === member.id && b.badge_type === 'silver_points')) {
+        badges.push({ id: `badge-${member.id}-silver-${Date.now()}`, member_id: member.id, badge_type: 'silver_points', badge_name: '⭐ Silver Contributor', earned_at: new Date().toISOString() });
+      }
+      if (totalPoints >= 300 && !badges.some(b => b.member_id === member.id && b.badge_type === 'gold_points')) {
+        badges.push({ id: `badge-${member.id}-gold-${Date.now()}`, member_id: member.id, badge_type: 'gold_points', badge_name: '🏆 Gold Ambassador', earned_at: new Date().toISOString() });
+      }
+
+      return {
+        ...member,
+        total_points: totalPoints,
+        current_streak: currentStreak,
+        longest_streak: longestStreak,
+        total_active_days: totalActiveDays,
+        last_active_date: dateStr,
+        consecutive_inactive_days: 0,
+        status,
+        level,
+        updated_at: new Date().toISOString()
+      };
+    } else {
+      let inactiveDays = member.consecutive_inactive_days;
+      if (member.last_active_date) {
+        const lastActive = new Date(member.last_active_date);
+        const diffTime = Math.abs(submissionDate.getTime() - lastActive.getTime());
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        inactiveDays = diffDays;
+      } else {
+        inactiveDays += 1;
+      }
+
+      let currentStreak = member.current_streak;
+      if (inactiveDays > 1) currentStreak = 0;
+
+      let status = member.status;
+      if (inactiveDays >= 12) {
+        status = 'inactive';
+      } else if (inactiveDays >= 7) {
+        status = 'warning';
+      }
+
+      return {
+        ...member,
+        current_streak: currentStreak,
+        consecutive_inactive_days: inactiveDays,
+        status,
+        updated_at: new Date().toISOString()
+      };
+    }
+  });
+
+  saveMembers(updatedMembers);
+  saveActivityLogs(logs);
+  saveBadges(badges);
+
+  auditTrails.unshift({
+    id: `audit-${Date.now()}`,
+    admin_email: state.currentAdminEmail,
+    admin_name: adminName,
+    action: 'SUBMIT_BULK_ACTIVITY',
+    entity_type: 'ACTIVITY',
+    description: `Processed activity for ${dateStr}. Marked ${activeMemberIds.length} active out of ${members.length} members.`,
+    timestamp: new Date().toISOString()
+  });
+  saveAuditTrails(auditTrails);
+
+  loadStateFromStorage();
+  updateState({ bulkInputText: '', uncheckedUnregisteredNames: [] });
+  showToast('মেম্বার অ্যাক্টিভিটি এবং ডেইলি লিংক সফলভাবে সেভ করা হয়েছে!', 'success');
+}
+
+// Global Render loop matching current Tab
+function render() {
+  const container = document.getElementById('app');
+  if (!container) return;
+
+  // Active overview statistics calculations
+  const totalCount = state.members.length;
+  const activeCount = state.members.filter(m => m.status === 'active').length;
+  const inactiveCount = state.members.filter(m => m.status === 'inactive' || m.status === 'warning').length;
+  const diamondCount = state.members.filter(m => m.level === 'Diamond').length;
+
+  container.innerHTML = `
+    <!-- Sticky Admin Header Banner -->
+    <header class="border-b border-slate-800 bg-slate-900/50 backdrop-blur-md sticky top-0 z-40">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <div class="w-3 h-3 rounded-full bg-indigo-500 shadow-[0_0_8px_#6366f1] animate-pulse"></div>
+          <div>
+            <h1 class="text-base sm:text-lg font-bold tracking-tight text-white flex items-center gap-1.5">
+              Support Link Box 
+              <span class="text-[10px] bg-indigo-500/15 text-indigo-400 font-bold px-2 py-0.5 rounded-full border border-indigo-500/20 uppercase tracking-widest">
+                v2.0 Admin
+              </span>
+            </h1>
+            <p class="text-[10px] sm:text-xs text-slate-500 font-medium tracking-wide">মেম্বার অ্যাক্টিভিটি এবং ডেইলি লিংক ট্র্যাকিং প্ল্যাটফর্ম</p>
+          </div>
+        </div>
+
+        <!-- Admin Profile Switcher dropdown -->
+        <div class="flex items-center gap-2">
+          <span class="text-[10px] text-slate-500 uppercase font-bold tracking-wider hidden md:inline">Active Admin Panel</span>
+          <select id="admin-selector" class="bg-slate-950 border border-slate-800 text-slate-300 px-3 py-1.5 rounded-xl text-xs font-semibold focus:outline-none focus:border-indigo-500 cursor-pointer">
+            ${Object.entries(ADMIN_NAMES).map(([email, name]) => `
+              <option value="${email}" ${state.currentAdminEmail === email ? 'selected' : ''}>${name}</option>
+            `).join('')}
+            <option value="custom">+ নতুন এডমিন যোগ করুন</option>
+          </select>
+        </div>
+      </div>
+    </header>
+
+    <!-- Navigation Tabs Bar -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex-grow w-full space-y-6">
+      
+      ${state.showPwaInstallBanner ? `
+      <!-- PWA Installation Banner -->
+      <div id="pwa-install-banner" class="bg-gradient-to-r from-indigo-950/80 to-slate-900 border border-indigo-500/30 rounded-2xl p-5 shadow-lg flex flex-col md:flex-row items-center justify-between gap-4 relative overflow-hidden">
+        <div class="absolute -right-16 -top-16 w-36 h-36 bg-indigo-500/10 rounded-full blur-2xl pointer-events-none"></div>
+        <div class="flex items-center gap-4">
+          <div class="bg-indigo-600/20 p-3 rounded-xl border border-indigo-500/20 text-indigo-400 shrink-0">
+            <i data-lucide="smartphone" class="w-6 h-6"></i>
+          </div>
+          <div class="space-y-1">
+            <h4 class="text-sm font-bold text-slate-100 flex items-center gap-1.5">
+              মোবাইলে অ্যাপ হিসেবে ব্যবহার করুন!
+              <span class="text-[9px] bg-indigo-500 text-white font-black px-1.5 py-0.5 rounded uppercase tracking-wider">PWA APP</span>
+            </h4>
+            <p class="text-[11px] text-slate-400 leading-relaxed">
+              প্লে-স্টোরের ঝামেলা ছাড়াই এই অ্যাডমিন ড্যাশবোর্ডটি আপনার হোম স্ক্রিনে ইনস্টল করে নিন। সরাসরি অ্যাপের মতো ব্যবহার করতে পারবেন!
+            </p>
+          </div>
+        </div>
+        <div class="flex gap-2 w-full md:w-auto shrink-0">
+          <button id="pwa-close-banner-btn" class="w-1/2 md:w-auto bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 font-bold text-xs px-4 py-2.5 rounded-xl transition cursor-pointer">
+            পরে করুন
+          </button>
+          <button id="pwa-install-action-btn" class="w-1/2 md:w-auto bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs px-5 py-2.5 rounded-xl transition flex items-center justify-center gap-1.5 shadow-[0_4px_12px_rgba(79,70,229,0.3)] cursor-pointer">
+            <i data-lucide="download" class="w-4 h-4"></i>
+            ইনস্টল করুন
+          </button>
+        </div>
+      </div>
+      ` : ''}
+
+      <div class="flex overflow-x-auto bg-slate-900 border border-slate-800 p-1.5 rounded-2xl gap-1 no-scrollbar">
+        <button data-tab="members" class="tab-btn flex items-center gap-3 px-4 py-2.5 rounded-xl font-semibold text-xs transition duration-150 whitespace-nowrap cursor-pointer ${
+          state.currentTab === 'members'
+            ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/20 shadow-sm'
+            : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
+        }">
+          <span class="w-1.5 h-1.5 rounded-full ${state.currentTab === 'members' ? 'bg-indigo-400' : 'bg-slate-600'}"></span>
+          <i data-lucide="users" class="w-3.5 h-3.5"></i>
+          মেম্বার ডিরেক্টরি
+        </button>
+
+        <button data-tab="bulk_input" class="tab-btn flex items-center gap-3 px-4 py-2.5 rounded-xl font-semibold text-xs transition duration-150 whitespace-nowrap cursor-pointer ${
+          state.currentTab === 'bulk_input'
+            ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/20 shadow-sm'
+            : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
+        }">
+          <span class="w-1.5 h-1.5 rounded-full ${state.currentTab === 'bulk_input' ? 'bg-indigo-400' : 'bg-slate-600'}"></span>
+          <i data-lucide="clipboard-list" class="w-3.5 h-3.5"></i>
+          অ্যাক্টিভিটি ট্র্যাকার (লিংক ইনপুট)
+        </button>
+
+        <button data-tab="notices" class="tab-btn flex items-center gap-3 px-4 py-2.5 rounded-xl font-semibold text-xs transition duration-150 whitespace-nowrap cursor-pointer ${
+          state.currentTab === 'notices'
+            ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/20 shadow-sm'
+            : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
+        }">
+          <span class="w-1.5 h-1.5 rounded-full ${state.currentTab === 'notices' ? 'bg-indigo-400' : 'bg-slate-600'}"></span>
+          <i data-lucide="megaphone" class="w-3.5 h-3.5"></i>
+          নোটিশ জেনারেটর
+        </button>
+
+        <button data-tab="leaderboards" class="tab-btn flex items-center gap-3 px-4 py-2.5 rounded-xl font-semibold text-xs transition duration-150 whitespace-nowrap cursor-pointer ${
+          state.currentTab === 'leaderboards'
+            ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/20 shadow-sm'
+            : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
+        }">
+          <span class="w-1.5 h-1.5 rounded-full ${state.currentTab === 'leaderboards' ? 'bg-indigo-400' : 'bg-slate-600'}"></span>
+          <i data-lucide="trophy" class="w-3.5 h-3.5"></i>
+          লিডারবোর্ড ও স্ট্যাটস
+        </button>
+
+        <button data-tab="reports" class="tab-btn flex items-center gap-3 px-4 py-2.5 rounded-xl font-semibold text-xs transition duration-150 whitespace-nowrap cursor-pointer ${
+          state.currentTab === 'reports'
+            ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/20 shadow-sm'
+            : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
+        }">
+          <span class="w-1.5 h-1.5 rounded-full ${state.currentTab === 'reports' ? 'bg-indigo-400' : 'bg-slate-600'}"></span>
+          <i data-lucide="trending-up" class="w-3.5 h-3.5"></i>
+          মেম্বার রিপোর্ট জেনারেটর
+        </button>
+
+        <button data-tab="supabase" class="tab-btn flex items-center gap-3 px-4 py-2.5 rounded-xl font-semibold text-xs transition duration-150 whitespace-nowrap cursor-pointer ml-auto ${
+          state.currentTab === 'supabase'
+            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shadow-sm'
+            : 'text-slate-400 hover:text-emerald-400 hover:bg-slate-800/40'
+        }">
+          <span class="w-1.5 h-1.5 rounded-full ${state.currentTab === 'supabase' ? 'bg-emerald-400' : 'bg-slate-600'}"></span>
+          <i data-lucide="database" class="w-3.5 h-3.5"></i>
+          Developer section
+        </button>
+      </div>
+
+      <!-- Main Tab Content Render Target -->
+      <div id="tab-content-root" class="fade-in min-h-[400px]">
+        ${renderTabContent(totalCount, activeCount, inactiveCount, diamondCount)}
+      </div>
+
+      <!-- Persistent Admin Audit Trail Log -->
+      <section class="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-xl space-y-3">
+        <h3 class="font-bold text-xs text-slate-400 uppercase tracking-wider flex items-center gap-1.5 border-b border-slate-800 pb-2">
+          <i data-lucide="history" class="w-4 h-4 text-indigo-400"></i>
+          Database Audit History (অডিট লগ রেকর্ড)
+        </h3>
+        <div class="max-h-36 overflow-y-auto space-y-1 pr-1 font-mono text-[10px] text-slate-500">
+          ${state.auditTrails.length > 0 
+            ? state.auditTrails.map(audit => `
+              <div class="flex flex-col sm:flex-row justify-between py-1.5 border-b border-slate-850/40">
+                <div class="space-x-1">
+                  <span class="text-indigo-400 font-bold">[${audit.admin_name}]</span>
+                  <span class="bg-slate-950 text-indigo-400 px-1 py-0.2 rounded font-semibold">${audit.action}</span>
+                  <span class="text-slate-300">${audit.description}</span>
+                </div>
+                <span class="text-slate-600 font-medium text-[9px] mt-1 sm:mt-0">${new Date(audit.timestamp).toLocaleTimeString()}</span>
+              </div>
+            `).join('')
+            : '<p class="italic py-2 text-center text-slate-600">কোনো অডিট লগ ইতিহাস নেই।</p>'
+          }
+        </div>
+      </section>
+    </main>
+
+    <!-- Standard Footer -->
+    <footer class="border-t border-slate-800 bg-slate-950 py-4 mt-8">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center text-[11px] text-slate-500 font-medium flex flex-col sm:flex-row justify-between items-center gap-2">
+        <p>© ${new Date().getFullYear()} Support Link Box Administration Team. All Rights Reserved.</p>
+        <div class="flex gap-4">
+          <span class="text-emerald-500 flex items-center gap-1">
+            <span class="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping"></span>
+            Workspace Synced
+          </span>
+          <span class="text-slate-600">|</span>
+          <p>Designed for Facebook Support Link Box Group</p>
+        </div>
+      </div>
+    </footer>
+
+    ${state.showRegisterModal ? `
+    <div id="register-member-modal" class="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 flex items-center justify-center p-4">
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg p-6 shadow-2xl relative space-y-4">
+        <!-- Close button -->
+        <button id="close-register-modal" class="absolute top-4 right-4 text-slate-400 hover:text-slate-200 transition p-1 hover:bg-slate-800 rounded-lg cursor-pointer">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+
+        <div class="space-y-1">
+          <h3 class="text-base font-bold text-slate-100 flex items-center gap-1.5">
+            <i data-lucide="user-plus" class="text-indigo-400 w-5 h-5"></i>
+            নতুন মেম্বার রেজিস্ট্রেশন বক্স
+          </h3>
+          <p class="text-[11px] text-slate-400">
+            এখানে মেম্বারদের নাম দিয়ে রেজিস্টার করুন। আপনি একসাথে একাধিক মেম্বারও এড করতে পারেন।
+          </p>
+        </div>
+
+        <form id="add-member-form" class="space-y-4">
+          <div class="space-y-2">
+            <label class="block text-xs font-semibold text-slate-400">মেম্বারের নাম (Single or Multiple @mention)</label>
+            <textarea id="reg-name-input" rows="4" placeholder="যেমন: @Md Emon অথবা একাধিক হলে: @Md Emon @Rakib Islam @Kobir Khan" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-200 placeholder-slate-700 focus:outline-none focus:border-indigo-500 transition-all font-mono" required></textarea>
+            <div class="text-[10px] text-indigo-400 font-semibold bg-indigo-950/30 p-2.5 rounded-lg border border-indigo-500/20 leading-relaxed">
+              <span class="text-indigo-300 font-bold">ফরমেট যেমন:</span> <code class="bg-slate-950 px-1 py-0.5 rounded text-indigo-300 font-mono">@Rakib Islam @kobir Khan @Babor ajam</code>
+            </div>
+          </div>
+
+          <div class="flex gap-2 justify-end pt-2">
+            <button type="button" id="close-register-modal-btn" class="bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs px-4 py-2.5 rounded-xl transition cursor-pointer">
+              বন্ধ করুন
+            </button>
+            <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs px-5 py-2.5 rounded-xl transition flex items-center gap-1.5 shadow-[0_4px_12px_rgba(79,70,229,0.3)] cursor-pointer">
+              <i data-lucide="user-plus" class="w-3.5 h-3.5"></i>
+              মেম্বার এড করুন
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+    ` : ''}
+
+    ${state.generatedPngUrl ? `
+    <div id="png-download-modal" class="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 flex items-center justify-center p-4">
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-xl p-6 shadow-2xl relative space-y-4">
+        <!-- Close button -->
+        <button id="close-png-modal" class="absolute top-4 right-4 text-slate-400 hover:text-slate-200 transition p-1 hover:bg-slate-800 rounded-lg cursor-pointer">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+
+        <div class="text-center space-y-1">
+          <h3 class="text-base font-bold text-slate-100 flex items-center justify-center gap-1.5">
+            <i data-lucide="image" class="text-indigo-400 w-5 h-5"></i>
+            পারফরম্যান্স কার্ড ইমেজ রেডি!
+          </h3>
+          <p class="text-[11px] text-slate-400">
+            মোবাইল বা আইফোনে অটোমেটিক ডাউনলোড শুরু না হলে নিচের ছবিতে কিছুক্ষণ চেপে ধরে রাখুন (Long Press) এবং <b>"Save Image"</b> বা <b>"Download Image"</b> সিলেক্ট করুন।
+          </p>
+        </div>
+
+        <!-- Rendered Image -->
+        <div class="border border-slate-800 rounded-xl overflow-hidden bg-slate-950 flex justify-center p-2 max-h-[60vh] overflow-y-auto">
+          <img src="${state.generatedPngUrl}" alt="Performance Card" class="max-w-full h-auto rounded-lg shadow-lg border border-slate-800" referrerPolicy="no-referrer" />
+        </div>
+
+        <div class="flex gap-2 justify-end">
+          <button id="close-png-modal-btn" class="bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs px-4 py-2 rounded-xl transition cursor-pointer">
+            বন্ধ করুন
+          </button>
+          <a href="${state.generatedPngUrl}" download="${state.generatedPngMemberName.replace(/\s+/g, '_')}_Performance_Card.png" id="direct-download-png-btn" class="bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs px-5 py-2 rounded-xl transition flex items-center gap-1 cursor-pointer">
+            <i data-lucide="download" class="w-3.5 h-3.5"></i>
+            ডিভাইসে ডাউনলোড করুন
+          </a>
+        </div>
+      </div>
+    </div>
+    ` : ''}
+
+    ${state.toast ? `
+    <!-- Floating Toast Notification -->
+    <div id="toast-notification" class="fixed bottom-6 right-6 z-50 transform translate-y-0 opacity-100 transition-all duration-300 max-w-sm w-full bg-slate-900 border ${
+      state.toast.type === 'error' ? 'border-rose-500/30 shadow-rose-950/20' :
+      state.toast.type === 'info' ? 'border-indigo-500/30 shadow-indigo-950/20' :
+      'border-emerald-500/30 shadow-emerald-950/20'
+    } p-4 rounded-xl shadow-2xl flex items-start gap-3.5 backdrop-blur-md animate-bounce-subtle">
+      <div class="p-2 rounded-lg ${
+        state.toast.type === 'error' ? 'bg-rose-500/10 text-rose-400' :
+        state.toast.type === 'info' ? 'bg-indigo-500/10 text-indigo-400' :
+        'bg-emerald-500/10 text-emerald-400'
+      }">
+        <i data-lucide="${
+          state.toast.type === 'error' ? 'alert-triangle' :
+          state.toast.type === 'info' ? 'info' :
+          'check-circle'
+        }" class="w-5 h-5"></i>
+      </div>
+      <div class="flex-grow space-y-0.5">
+        <h4 class="text-xs font-black text-slate-100">
+          ${
+            state.toast.type === 'error' ? 'ব্যর্থ হয়েছে' :
+            state.toast.type === 'info' ? 'তথ্য' :
+            'সফল হয়েছে'
+          }
+        </h4>
+        <p class="text-[11px] text-slate-400 font-medium leading-relaxed">${state.toast.message}</p>
+      </div>
+      <button id="close-toast-btn" class="text-slate-500 hover:text-slate-300 transition shrink-0 cursor-pointer">
+        <i data-lucide="x" class="w-4 h-4"></i>
+      </button>
+    </div>
+    ` : ''}
+  `;
+
+  // Hot Reload Icons
+  lucide.createIcons();
+  
+  // Bind dynamic interactive events
+  bindEvents();
+}
+
+// Sub-Tab HTML Render templates
+function renderTabContent(totalCount, activeCount, inactiveCount, diamondCount) {
+  switch (state.currentTab) {
+    
+    // TAB: MEMBERS
+    case 'members': {
+      // Search and Filter records
+      const filtered = state.members.filter(m => {
+        const matchesQuery = m.name.toLowerCase().includes(state.searchQueryMembers.toLowerCase()) || 
+                             m.display_name.toLowerCase().includes(state.searchQueryMembers.toLowerCase()) || 
+                             m.member_number.toString() === state.searchQueryMembers;
+        
+        if (state.memberFilterStatus === 'all') return matchesQuery;
+        if (state.memberFilterStatus === 'active') return matchesQuery && m.status === 'active';
+        if (state.memberFilterStatus === 'warning') return matchesQuery && m.status === 'warning';
+        if (state.memberFilterStatus === 'inactive') return matchesQuery && m.status === 'inactive';
+        if (state.memberFilterStatus === 'diamond') return matchesQuery && m.level === 'Diamond';
+        if (state.memberFilterStatus === 'gold') return matchesQuery && m.level === 'Gold';
+        if (state.memberFilterStatus === 'silver') return matchesQuery && m.level === 'Silver';
+        if (state.memberFilterStatus === 'bronze') return matchesQuery && m.level === 'Bronze';
+        return matchesQuery;
+      });
+
+      return `
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          
+          <!-- Main Welcome Dashboard Overview -->
+          <div class="lg:col-span-12 bg-gradient-to-br from-slate-900 via-slate-900 to-indigo-950/20 border border-slate-800 p-6 sm:p-8 rounded-2xl shadow-xl relative overflow-hidden space-y-6">
+            <div class="absolute right-0 top-0 w-80 h-80 bg-indigo-500/5 rounded-full blur-3xl pointer-events-none"></div>
+            <div class="absolute -left-10 -bottom-10 w-60 h-60 bg-emerald-500/5 rounded-full blur-2xl pointer-events-none"></div>
+            
+            <div class="relative z-10">
+              <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800/80 pb-5">
+                <div class="space-y-1.5">
+                  <div class="flex items-center gap-2">
+                    <span class="flex h-2 w-2 relative">
+                      <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                      <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                    </span>
+                    <span class="text-[9px] bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 font-black px-2 py-0.5 rounded-full uppercase tracking-widest">
+                      Live Database Tracker
+                    </span>
+                  </div>
+                  <h2 class="text-xl sm:text-2xl font-black tracking-tight text-white flex items-center gap-2">
+                    <i data-lucide="sparkles" class="w-5 h-5 text-indigo-400"></i>
+                    সাপোর্ট লিংক বক্স অ্যাডমিন ওভারভিউ
+                  </h2>
+                  <p class="text-xs text-slate-400 max-w-3xl leading-relaxed">
+                    গ্রুপের সক্রিয় এবং নিষ্ক্রিয় মেম্বারদের দৈনিক লিংক সাবমিশন রিপোর্ট, অডিট ট্রেইল, স্ট্যাটিসটিক্স রিপোর্ট জেনারেটর এবং স্বয়ংক্রিয় ওয়ার্নিং নোটিশ জেনারেটরের সেন্ট্রাল কন্ট্রোল ড্যাশবোর্ড।
+                  </p>
+                </div>
+                
+                <div class="flex flex-wrap items-center gap-2.5 shrink-0">
+                  <button id="open-register-modal-btn" class="text-xs px-5 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-black rounded-xl flex items-center gap-2 transition duration-200 shadow-[0_4px_14px_rgba(79,70,229,0.35)] cursor-pointer hover:scale-[1.02]">
+                    <i data-lucide="user-plus" class="w-4 h-4"></i>
+                    নতুন মেম্বার এড করুন
+                  </button>
+                  <button id="clear-demo-btn" class="text-[10px] px-3.5 py-3 bg-rose-500/5 hover:bg-rose-500/15 text-rose-400 border border-rose-500/20 rounded-xl font-black uppercase tracking-wider flex items-center gap-1.5 transition duration-200 cursor-pointer">
+                    <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                    রিসেট ও ডেমো মুছুন
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Beautifully styled modern stats cards -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 relative z-10">
+              <!-- Total Members -->
+              <div class="bg-gradient-to-br from-slate-950 to-slate-900 p-5 rounded-2xl border border-indigo-500/10 text-left relative overflow-hidden group hover:border-indigo-500/30 transition duration-300">
+                <div class="absolute -right-6 -bottom-6 w-20 h-20 bg-indigo-500/5 rounded-full blur-xl group-hover:bg-indigo-500/10 transition duration-300 pointer-events-none"></div>
+                <div class="flex items-center justify-between">
+                  <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">মোট রেজিস্টার্ড মেম্বার</span>
+                  <div class="w-8 h-8 rounded-lg bg-indigo-500/10 flex items-center justify-center text-indigo-400">
+                    <i data-lucide="users" class="w-4 h-4"></i>
+                  </div>
+                </div>
+                <div class="mt-4 flex items-baseline gap-2">
+                  <p class="text-3xl font-extrabold text-white tracking-tight font-mono">${totalCount}</p>
+                  <span class="text-[10px] text-slate-500 font-medium font-bold">জন মেম্বার</span>
+                </div>
+              </div>
+
+              <!-- Active Members -->
+              <div class="bg-gradient-to-br from-slate-950 to-slate-900 p-5 rounded-2xl border border-emerald-500/10 text-left relative overflow-hidden group hover:border-emerald-500/30 transition duration-300">
+                <div class="absolute -right-6 -bottom-6 w-20 h-20 bg-emerald-500/5 rounded-full blur-xl group-hover:bg-emerald-500/10 transition duration-300 pointer-events-none"></div>
+                <div class="flex items-center justify-between">
+                  <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">একটিভ মেম্বার</span>
+                  <div class="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center text-emerald-400">
+                    <i data-lucide="shield-check" class="w-4 h-4"></i>
+                  </div>
+                </div>
+                <div class="mt-4 flex items-baseline gap-2">
+                  <p class="text-3xl font-extrabold text-emerald-400 tracking-tight font-mono">${activeCount}</p>
+                  <span class="text-[10px] text-slate-500 font-medium font-bold">জন সক্রিয়</span>
+                </div>
+              </div>
+
+              <!-- Inactive Members -->
+              <div class="bg-gradient-to-br from-slate-950 to-slate-900 p-5 rounded-2xl border border-rose-500/10 text-left relative overflow-hidden group hover:border-rose-500/30 transition duration-300">
+                <div class="absolute -right-6 -bottom-6 w-20 h-20 bg-rose-500/5 rounded-full blur-xl group-hover:bg-rose-500/10 transition duration-300 pointer-events-none"></div>
+                <div class="flex items-center justify-between">
+                  <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">নিষ্ক্রিয় (⚠️ ওয়ার্নিং)</span>
+                  <div class="w-8 h-8 rounded-lg bg-rose-500/10 flex items-center justify-center text-rose-400">
+                    <i data-lucide="alert-triangle" class="w-4 h-4"></i>
+                  </div>
+                </div>
+                <div class="mt-4 flex items-baseline gap-2">
+                  <p class="text-3xl font-extrabold text-rose-400 tracking-tight font-mono">${inactiveCount}</p>
+                  <span class="text-[10px] text-slate-500 font-medium font-bold">জন ইনেক্টিভ</span>
+                </div>
+              </div>
+
+              <!-- Diamond Tiers -->
+              <div class="bg-gradient-to-br from-slate-950 to-slate-900 p-5 rounded-2xl border border-cyan-500/10 text-left relative overflow-hidden group hover:border-cyan-500/30 transition duration-300">
+                <div class="absolute -right-6 -bottom-6 w-20 h-20 bg-cyan-500/5 rounded-full blur-xl group-hover:bg-cyan-500/10 transition duration-300 pointer-events-none"></div>
+                <div class="flex items-center justify-between">
+                  <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">ডায়মন্ড মেম্বার (৫০০+ pt)</span>
+                  <div class="w-8 h-8 rounded-lg bg-cyan-500/10 flex items-center justify-center text-cyan-400">
+                    <i data-lucide="gem" class="w-4 h-4"></i>
+                  </div>
+                </div>
+                <div class="mt-4 flex items-baseline gap-2">
+                  <p class="text-3xl font-extrabold text-cyan-400 tracking-tight font-mono">${diamondCount}</p>
+                  <span class="text-[10px] text-slate-500 font-medium font-bold">💎 Diamond</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Main Member Table and Search Lists -->
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden mt-6">
+          <div class="p-5 border-b border-slate-800 bg-slate-950/40 flex flex-col sm:flex-row gap-4 items-center justify-between">
+            <div class="relative w-full sm:w-72">
+              <i data-lucide="search" class="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2"></i>
+              <input id="member-search-input" type="text" value="${state.searchQueryMembers}" placeholder="মেম্বারের নাম বা নম্বর লিখে খুঁজুন..." class="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2 text-xs text-slate-300 focus:outline-none focus:border-indigo-500 placeholder-slate-700" />
+            </div>
+
+            <!-- Filters list options -->
+            <div class="flex overflow-x-auto gap-1.5 w-full sm:w-auto pb-1 sm:pb-0 no-scrollbar">
+              ${[
+                { id: 'all', label: 'All' },
+                { id: 'active', label: 'Active' },
+                { id: 'warning', label: 'Warning (৭+ দিন)' },
+                { id: 'inactive', label: 'Inactive (১২+ দিন)' },
+                { id: 'diamond', label: '💎 Diamond' },
+                { id: 'gold', label: '⭐ Gold' },
+                { id: 'silver', label: '🥈 Silver' },
+                { id: 'bronze', label: '🥉 Bronze' }
+              ].map(f => `
+                <button data-filter="${f.id}" class="filter-tab-btn px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase border cursor-pointer transition-all ${
+                  state.memberFilterStatus === f.id
+                    ? 'bg-indigo-600/10 text-indigo-400 border-indigo-500/20'
+                    : 'bg-slate-950 text-slate-400 border-slate-850 hover:text-slate-200'
+                }">${f.label}</button>
+              `).join('')}
+            </div>
+          </div>
+
+          <!-- Main Table UI -->
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse">
+              <thead>
+                <tr class="bg-slate-950 text-[10px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-850">
+                  <th class="py-3 px-5 text-center w-14">ID</th>
+                  <th class="py-3 px-5">Name / Username</th>
+                  <th class="py-3 px-5 text-center">Status</th>
+                  <th class="py-3 px-5 text-center">Inactivity</th>
+                  <th class="py-3 px-5 text-center">Points & Streaks</th>
+                  <th class="py-3 px-5">Admin Notes / Remarks</th>
+                  <th class="py-3 px-5 text-right w-24">Actions</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-850/50">
+                ${filtered.length > 0 ? filtered.map(m => `
+                  <tr class="hover:bg-slate-950/30 group transition">
+                    <td class="py-3 px-5 text-center font-mono text-[11px] text-slate-500 font-bold">#${m.member_number}</td>
+                    <td class="py-3 px-5">
+                      <div>
+                        <p class="font-bold text-slate-200 text-xs sm:text-sm">${m.name}</p>
+                        <p class="text-[10px] text-indigo-400 mt-0.5">${m.display_name}</p>
+                      </div>
+                    </td>
+                    <td class="py-3 px-5 text-center">
+                      <span class="inline-block text-[9px] font-bold uppercase px-2 py-0.5 rounded ${
+                        m.status === 'active' ? 'bg-emerald-500/10 text-emerald-400' :
+                        m.status === 'warning' ? 'bg-amber-500/10 text-amber-400' : 'bg-rose-500/10 text-rose-400'
+                      }">● ${m.status}</span>
+                    </td>
+                    <td class="py-3 px-5 text-center font-mono text-xs ${m.consecutive_inactive_days > 0 ? 'text-rose-400 font-bold' : 'text-slate-500'}">
+                      ${m.consecutive_inactive_days > 0 ? `${m.consecutive_inactive_days} দিন` : 'Active'}
+                    </td>
+                    <td class="py-3 px-5 text-center">
+                      <div class="inline-block text-left">
+                        <div class="flex items-center gap-1 font-semibold text-slate-300 font-mono text-xs">
+                          <span class="text-yellow-400">★</span> ${m.total_points} Pts
+                        </div>
+                        <div class="text-[10px] text-slate-500 mt-0.5 flex gap-1 items-center font-mono">
+                          🔥 <span class="text-rose-400 font-medium">${m.current_streak}</span> streak
+                        </div>
+                      </div>
+                    </td>
+                    <td class="py-3 px-5 text-xs text-slate-300 max-w-[200px] truncate">
+                      ${state.editingNotesMemberId === m.id ? `
+                        <div class="flex gap-1 items-center">
+                          <input id="edit-notes-input" type="text" value="${state.editingNotesText}" class="bg-slate-950 border border-slate-750 text-xs text-slate-200 rounded px-2 py-1 w-full focus:outline-none focus:border-indigo-500" />
+                          <button data-save-notes="${m.id}" class="text-green-400 hover:text-green-300 p-1 cursor-pointer"><i data-lucide="check" class="w-4 h-4"></i></button>
+                        </div>
+                      ` : `
+                        <span class="text-slate-400">${m.notes || '—'}</span>
+                        <button data-edit-notes-btn="${m.id}" data-notes-val="${m.notes}" class="text-slate-600 hover:text-indigo-400 p-1 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer inline-block ml-1"><i data-lucide="edit-2" class="w-3 h-3"></i></button>
+                      `}
+                    </td>
+                    <td class="py-3 px-5 text-right">
+                      <div class="flex items-center justify-end gap-1">
+                        <button data-toggle-status="${m.id}" title="Toggle Status" class="p-1.5 rounded-lg bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-indigo-400 cursor-pointer transition"><i data-lucide="shield-alert" class="w-3.5 h-3.5"></i></button>
+                        <button data-reset-stats="${m.id}" title="Reset Stats" class="p-1.5 rounded-lg bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-amber-500 cursor-pointer transition"><i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i></button>
+                        <button data-delete-member="${m.id}" title="Remove Member" class="p-1.5 rounded-lg bg-slate-950 hover:bg-rose-950/40 text-slate-400 hover:text-rose-400 cursor-pointer transition"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>
+                      </div>
+                    </td>
+                  </tr>
+                `).join('') : `
+                  <tr>
+                    <td colspan="7" class="py-8 text-center text-xs text-slate-500 italic">কোনো মেম্বার খুঁজে পাওয়া যায়নি!</td>
+                  </tr>
+                `}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    }
+
+    // TAB: BULK INPUT / ACTIVITY TRACKER
+    case 'bulk_input': {
+      const { parsedNames, matchedMembers, unregisteredNames } = parseBulkActivityText(state.bulkInputText);
+
+      return `
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          
+          <!-- Left box: main activity tracker text inputs -->
+          <div class="lg:col-span-6 bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-4">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div class="flex items-center gap-2.5">
+                <i data-lucide="clipboard-list" class="w-5 h-5 text-indigo-400"></i>
+                <h3 class="font-bold text-slate-100 text-base">ডেইলি লিংক প্রদান সাবমিশন ট্র্যাকার</h3>
+              </div>
+              <input id="bulk-input-date" type="date" value="${state.bulkInputDate}" class="bg-slate-950 border border-slate-800 text-xs px-3 py-1.5 rounded-xl text-slate-300 font-semibold focus:outline-none focus:border-indigo-500 cursor-pointer" />
+            </div>
+
+            <p class="text-xs text-slate-400 leading-relaxed">
+              ফেসবুক মেসেঞ্জার গ্রুপ বা লিংক বক্স পোস্ট থেকে মেম্বারদের দৈনিক জমা দেওয়া লিংক তালিকার টেক্সট সরাসরি নিচে পেস্ট করুন। সিস্টেম স্বয়ংক্রিয়ভাবে ডানপাশের চেকলিস্টে টিক মার্ক করে দেবে। অথবা সরাসরি ডানপাশের তালিকা থেকে ম্যানুয়ালি মেম্বার সিলেক্ট করুন।
+            </p>
+
+            <textarea id="bulk-activity-textarea" rows="12" placeholder="১. @Rahi Ahmed Rabiul&#10;২. @Orithra Mazumder&#10;৩. @Ahmed Sopon" class="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 text-xs text-slate-300 placeholder-slate-700 focus:outline-none focus:border-indigo-500 font-mono leading-relaxed resize-y">${state.bulkInputText}</textarea>
+
+            <button id="save-activity-btn" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xs py-3.5 rounded-xl shadow-[0_4px_12px_rgba(79,70,229,0.3)] transition-all flex items-center justify-center gap-2 cursor-pointer" ${matchedMembers.length === 0 ? 'disabled' : ''}>
+              <i data-lucide="save" class="w-4 h-4"></i>
+              ডেইলি অ্যাক্টিভিটি ডেটাবেজে সেভ করুন (${matchedMembers.length} জন সক্রিয়)
+            </button>
+          </div>
+
+          <!-- Right column: real-time parser diagnostic output -->
+          <div class="lg:col-span-6 flex flex-col gap-6">
+            
+            <!-- Panel 1: Matched Registered Members List -->
+            <div class="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-xl flex-grow flex flex-col justify-between min-h-[300px]">
+              <div>
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/60 pb-3 mb-3">
+                  <h4 class="font-bold text-slate-200 text-xs uppercase tracking-wider flex items-center gap-1.5">
+                    <i data-lucide="check-circle" class="w-4 h-4 text-emerald-400"></i>
+                    সনাক্তকৃত সক্রিয় মেম্বার (${matchedMembers.length} জন)
+                  </h4>
+                </div>
+
+                <div class="max-h-72 overflow-y-auto space-y-1.5 pr-1 divide-y divide-slate-850/40 font-mono text-[10px]">
+                  ${matchedMembers.length > 0 ? matchedMembers.map(m => `
+                    <div class="flex justify-between items-center py-2 px-2 hover:bg-slate-950/40 rounded-lg transition-colors">
+                      <span class="text-slate-100 font-semibold">${m.name}</span>
+                      <div class="flex items-center gap-2">
+                        <span class="text-slate-500 font-bold">No.${m.member_number}</span>
+                        <span class="px-1.5 py-0.5 rounded text-[8px] font-bold ${
+                          m.level === 'Diamond' ? 'bg-cyan-500/10 text-cyan-400' :
+                          m.level === 'Gold' ? 'bg-amber-500/10 text-amber-400' :
+                          m.level === 'Silver' ? 'bg-slate-300/10 text-slate-300' :
+                          'bg-amber-700/10 text-amber-600'
+                        }">${m.level}</span>
+                      </div>
+                    </div>
+                  `).join('') : `
+                    <p class="text-[11px] text-slate-600 italic py-8 text-center">ইনপুট বক্সে মেম্বারদের নামের টেক্সট পেস্ট করুন।</p>
+                  `}
+                </div>
+              </div>
+
+              <div class="bg-indigo-500/5 border border-indigo-500/10 rounded-xl p-3 flex gap-2 items-start mt-4">
+                <i data-lucide="award" class="w-4 h-4 text-indigo-400 flex-shrink-0 mt-0.5"></i>
+                <p class="text-[10px] text-slate-400 leading-relaxed">
+                  <strong class="text-indigo-400">পয়েন্টস বোনাস:</strong> ডেটাবেজে সেভ করার সাথে সাথে সনাক্তকৃত মেম্বারদের মোট পয়েন্টে <span class="font-bold font-mono text-indigo-400">+১০ পয়েন্ট</span> যোগ হবে এবং তাদের ডেইলি স্ট্রেইক সংখ্যা ১ দিন বৃদ্ধি পাবে।
+                </p>
+              </div>
+            </div>
+
+            <!-- Panel 2: Unmatched unregistered names finder -->
+            <div class="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-xl">
+              <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/60 pb-3 mb-3">
+                <h4 class="font-bold text-slate-200 text-xs uppercase tracking-wider flex items-center gap-1.5">
+                  <i data-lucide="alert-triangle" class="w-4 h-4 text-amber-500 animate-pulse"></i>
+                  অননুমোদিত / নতুন নাম (${unregisteredNames.length} জন)
+                </h4>
+                ${unregisteredNames.length > 0 ? `
+                  <div class="flex items-center gap-2">
+                    <button id="select-all-new-btn" class="text-[9px] bg-amber-500/10 hover:bg-amber-600 text-amber-400 hover:text-slate-950 px-2 py-1 rounded-md border border-amber-500/20 font-bold transition-all cursor-pointer">
+                      সব সিলেক্ট
+                    </button>
+                    <button id="deselect-all-new-btn" class="text-[9px] bg-rose-500/10 hover:bg-rose-500 text-rose-400 hover:text-white px-2 py-1 rounded-md border border-rose-500/20 font-bold transition-all cursor-pointer">
+                      সব বাদ
+                    </button>
+                  </div>
+                ` : ''}
+              </div>
+              <p class="text-[10px] text-slate-400 mb-3">নিচের নামগুলো ডাটাবেজে পাওয়া যায়নি। আপনি চাইলে এগুলো সিলেক্ট করে একসাথে বা আলাদাভাবে রেজিস্টার করতে পারেন।</p>
+              
+              <div class="max-h-40 overflow-y-auto space-y-1.5 pr-1 divide-y divide-slate-850/40 font-mono text-[10px]">
+                ${unregisteredNames.length > 0 ? unregisteredNames.map(name => {
+                  const isChecked = !state.uncheckedUnregisteredNames.includes(name);
+                  return `
+                    <div class="flex justify-between items-center py-2 px-1 hover:bg-slate-950/30 rounded-lg">
+                      <label class="flex items-center gap-2 cursor-pointer select-none">
+                        <input type="checkbox" data-new-name-check="${name}" class="new-member-checkbox rounded border-slate-800 text-amber-500 focus:ring-amber-500/20 w-4.5 h-4.5 bg-slate-950 cursor-pointer" ${isChecked ? 'checked' : ''} />
+                        <span class="${isChecked ? 'text-amber-400 font-bold' : 'text-slate-400'} transition-all">${name}</span>
+                      </label>
+                      <button data-quick-add-name="${name}" class="text-indigo-400 hover:text-indigo-300 font-bold flex items-center gap-1 cursor-pointer">
+                        <i data-lucide="plus-circle" class="w-3.5 h-3.5"></i> Add
+                      </button>
+                    </div>
+                  `;
+                }).join('') : `
+                  <p class="text-[11px] text-slate-600 italic py-4 text-center">কোনো অননুমোদিত নাম পাওয়া যায়নি।</p>
+                `}
+              </div>
+
+              ${unregisteredNames.length > 0 ? `
+                <div class="mt-4 pt-3 border-t border-slate-800/60">
+                  <button id="register-selected-new-btn" class="w-full bg-amber-600 hover:bg-amber-500 text-slate-950 font-extrabold text-[11px] py-2.5 rounded-xl shadow-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer" ${unregisteredNames.filter(n => !state.uncheckedUnregisteredNames.includes(n)).length === 0 ? 'disabled' : ''}>
+                    <i data-lucide="user-plus" class="w-4 h-4"></i>
+                    নির্বাচিত (${unregisteredNames.filter(n => !state.uncheckedUnregisteredNames.includes(n)).length} জন) নতুন মেম্বার একসাথে রেজিস্টার করুন
+                  </button>
+                </div>
+              ` : ''}
+            </div>
+
+          </div>
+        </div>
+      `;
+    }
+
+    // TAB: NOTICE GENERATOR
+    case 'notices': {
+      // Inactive members query calculations
+      const warningMembers = state.members.filter(m => m.consecutive_inactive_days >= state.noticeFilterDays);
+      
+      const formatWarningNotice = () => {
+        const dateStr = new Date().toLocaleDateString('bn-BD', { day: 'numeric', month: 'long', year: 'numeric' });
+        
+        const listText = warningMembers.length > 0 
+          ? warningMembers.map((m, idx) => `${idx + 1}️⃣➤ ${m.name} (${m.consecutive_inactive_days} দিন ইনেক্টিভ)`).join('\n')
+          : '😴 বর্তমানে এই ফিল্টারে কোনো নিষ্ক্রিয় মেম্বার নেই!';
+
+        return `⚠️ গ্রুপ ওয়ার্নিং নোটিশ (Warning Notice) ⚠️
+
+আসসালামু আলাইকুম, আমাদের গ্রুপে যারা তিন বা তার বেশি দিন ধরে নিষ্ক্রিয় রয়েছেন এবং গ্রুপ লিংক সাপোর্ট দিচ্ছেন না, তাদের একটি চূড়ান্ত সতর্কবার্তা দেওয়া হচ্ছে।
+
+অনুগ্রহ করে যত দ্রুত সম্ভব এক্টিভ হন অথবা কোনো সমস্যা থাকলে এডমিনের সাথে যোগাযোগ করুন। অন্যথায় আপনাদের গ্রুপ থেকে রিমুভ করা হবে।
+
+😴 Inactive Members 👇
+〰〰〰〰〰〰〰〰〰〰
+
+${listText}
+〰〰〰〰〰〰〰〰〰〰
+📅 তারিখ: ${dateStr}
+
+✍️ Support Link Box Admin Team`;
+      };
+
+      return `
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          
+          <!-- Configuration Column -->
+          <div class="lg:col-span-4 bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-5">
+            <div class="flex items-center gap-2 border-b border-slate-800 pb-3">
+              <i data-lucide="megaphone" class="w-5 h-5 text-indigo-400"></i>
+              <h3 class="font-bold text-slate-100 text-lg">নোটিশ মেকার ও জেনারেটর</h3>
+            </div>
+
+            <p class="text-xs text-slate-400 leading-relaxed">
+              যেসব গ্রুপ মেম্বাররা লিংক প্রদান না করে নিষ্ক্রিয় রয়েছে, তাদের জন্য ফিল্টার সিলেক্ট করে ওয়ার্নিং নোটিশ তৈরি করুন।
+            </p>
+
+            <div class="space-y-4 bg-slate-950 p-4 rounded-xl border border-slate-800">
+              <div>
+                <label class="block text-xs font-semibold text-slate-400 mb-1.5 flex justify-between">
+                  <span>নিষ্ক্রিয়তার সময়সীমা (Inactivity Filter)</span>
+                  <span class="text-indigo-400 font-bold">${state.noticeFilterDays} দিন বা তার বেশি</span>
+                </label>
+                <select id="notice-filter-days" class="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-slate-200 cursor-pointer focus:outline-none focus:border-indigo-500">
+                  <option value="3" ${state.noticeFilterDays === 3 ? 'selected' : ''}>৩ দিন বা তার বেশি (3+ Days Inactive)</option>
+                  <option value="5" ${state.noticeFilterDays === 5 ? 'selected' : ''}>৫ দিন বা তার বেশি (5+ Days Inactive)</option>
+                  <option value="7" ${state.noticeFilterDays === 7 ? 'selected' : ''}>৭ দিন বা তার বেশি (7+ Days Inactive)</option>
+                  <option value="10" ${state.noticeFilterDays === 10 ? 'selected' : ''}>১০ দিন বা তার বেশি (10+ Days Inactive)</option>
+                  <option value="12" ${state.noticeFilterDays === 12 ? 'selected' : ''}>১২ দিন বা তার বেশি (12+ Days Inactive)</option>
+                </select>
+              </div>
+            </div>
+
+            <button id="copy-notice-btn" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs py-3.5 rounded-xl shadow-[0_4px_12px_rgba(79,70,229,0.3)] transition-all flex items-center justify-center gap-2 cursor-pointer">
+              <i data-lucide="clipboard" class="w-4 h-4"></i>
+              ${state.copiedNotice ? 'Notice Copied!' : 'Generate & Copy Notice'}
+            </button>
+          </div>
+
+          <!-- Notice Content Box -->
+          <div class="lg:col-span-8 bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl flex flex-col justify-between">
+            <div class="space-y-4 flex flex-col h-full justify-between">
+              <div class="flex justify-between items-center border-b border-slate-800 pb-3">
+                <span class="text-xs font-bold text-slate-400 flex items-center gap-1.5 uppercase tracking-wider">
+                  <i data-lucide="calendar" class="w-3.5 h-3.5 text-indigo-400"></i> Notice Output
+                </span>
+                <span class="text-[10px] text-slate-500 font-bold font-mono uppercase">${warningMembers.length} Inactive Found</span>
+              </div>
+
+              <div class="bg-slate-950 rounded-xl p-4 border border-slate-800 max-h-[350px] overflow-y-auto font-mono text-[11px] text-slate-300 whitespace-pre-wrap leading-relaxed select-all">
+                ${formatWarningNotice()}
+              </div>
+
+              <div class="bg-indigo-500/5 border border-indigo-500/10 rounded-xl p-3 flex gap-2 items-start mt-2">
+                <i data-lucide="alert-triangle" class="w-4 h-4 text-indigo-400 flex-shrink-0 mt-0.5"></i>
+                <p class="text-[10px] text-slate-500 leading-relaxed">
+                  <strong class="text-indigo-400">গুরুত্বপূর্ণ ফিক্স:</strong> নোটিশে মেম্বারদের নামের পাশে তাদের সঠিক ইনেক্টিভ দিনসমূহ (যেমন: ৭ দিন, ৯ দিন, ১২ দিন) নির্ভুলভাবে প্রদর্শন করা হয়েছে। এটি ডুপ্লিকেট এন্ট্রি এবং সাধারণ ওয়ার্নিং সংখ্যা ফিক্সড রাখার ত্রুটি দূর করেছে।
+                </p>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      `;
+    }
+
+    // TAB: LEADERBOARDS
+    case 'leaderboards': {
+      // Filter list for stats search
+      const filteredForStats = state.members.filter(m => 
+        m.name.toLowerCase().includes(state.leaderboardSearchQuery.toLowerCase()) || 
+        m.display_name.toLowerCase().includes(state.leaderboardSearchQuery.toLowerCase()) ||
+        m.member_number.toString() === state.leaderboardSearchQuery
+      );
+
+      const activeList = [...filteredForStats]
+        .filter(m => m.total_points >= state.leaderboardActiveThreshold)
+        .sort((a, b) => b.total_points - a.total_points || b.current_streak - a.current_streak);
+
+      const inactiveList = [...filteredForStats]
+        .filter(m => m.consecutive_inactive_days >= state.leaderboardInactiveThreshold)
+        .sort((a, b) => b.consecutive_inactive_days - a.consecutive_inactive_days);
+
+      const topActive = activeList.slice(0, 3);
+      const topInactive = inactiveList.slice(0, 3);
+
+      return `
+        <div class="space-y-6">
+          
+          <!-- Search statistics bar -->
+          <div class="bg-slate-900 border border-slate-800 p-4 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div class="flex items-center gap-2">
+              <i data-lucide="trophy" class="w-5 h-5 text-indigo-400"></i>
+              <h3 class="font-bold text-slate-100 text-sm">গ্রুপ মেম্বারদের ওভারঅল লিডারবোর্ড (Statistics)</h3>
+            </div>
+            <div class="relative w-full sm:w-64">
+              <i data-lucide="search" class="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2"></i>
+              <input id="leaderboard-search" type="text" value="${state.leaderboardSearchQuery}" placeholder="লিডারবোর্ড থেকে মেম্বার খুঁজুন..." class="w-full bg-slate-950 border border-slate-800 rounded-lg pl-8 pr-3 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-indigo-500 placeholder-slate-700" />
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            
+            <!-- Left: Active Leaderboards list -->
+            <div class="bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-4">
+              <div class="flex flex-col sm:flex-row justify-between sm:items-center border-b border-slate-800 pb-3 gap-2">
+                <div class="flex items-center gap-2">
+                  <div class="w-8 h-8 rounded-lg bg-indigo-500/10 flex items-center justify-center text-indigo-400">
+                    <i data-lucide="flame" class="w-4.5 h-4.5 animate-pulse"></i>
+                  </div>
+                  <div>
+                    <h3 class="font-bold text-slate-100 text-sm uppercase tracking-wide">১. সক্রিয় মেম্বার লিডারবোর্ড (Active)</h3>
+                    <p class="text-[10px] text-slate-500">সবচেয়ে বেশি একটিভ ও পয়েন্ট অর্জনকারী মেম্বারদের তালিকা</p>
+                  </div>
+                </div>
+
+                <div>
+                  <select id="leaderboard-active-filter" class="bg-transparent border-0 text-[11px] text-slate-400 focus:outline-none cursor-pointer font-medium">
+                    <option value="1" ${state.leaderboardActiveThreshold === 1 ? 'selected' : ''}>১+ পয়েন্ট বা তার বেশি</option>
+                    <option value="100" ${state.leaderboardActiveThreshold === 100 ? 'selected' : ''}>১০০+ (Silver Tier)</option>
+                    <option value="300" ${state.leaderboardActiveThreshold === 300 ? 'selected' : ''}>৩০০+ (Gold Tier)</option>
+                    <option value="500" ${state.leaderboardActiveThreshold === 500 ? 'selected' : ''}>৫০০+ (Diamond Level)</option>
+                  </select>
+                </div>
+              </div>
+
+              <!-- Top 3 Podium for Active Members -->
+              <div class="grid grid-cols-3 gap-2 items-end pt-2 pb-5 border-b border-slate-850/60">
+                
+                <!-- 2nd Place (Silver Medal) -->
+                <div class="flex flex-col items-center space-y-1.5 text-center pb-2.5 bg-slate-950/20 border border-slate-850 rounded-xl p-2 h-36 justify-end relative">
+                  <span class="absolute top-1 left-2 text-[10px] text-slate-400 font-bold font-mono">#2</span>
+                  <div class="relative">
+                    <div class="w-10 h-10 rounded-full bg-slate-850 border-2 border-slate-400 flex items-center justify-center text-slate-300 font-bold text-xs shadow-md">
+                      🥈
+                    </div>
+                  </div>
+                  <div class="w-full">
+                    <p class="text-[10px] font-black text-slate-200 truncate">${topActive[1] ? topActive[1].name : '---'}</p>
+                    <p class="text-[8px] text-slate-500 font-bold font-mono truncate">${topActive[1] ? '🔥 ' + topActive[1].current_streak + ' d streak' : 'খালি স্লট'}</p>
+                    <div class="mt-1 bg-slate-400/10 border border-slate-400/20 text-slate-300 rounded px-1.5 py-0.5 text-[9px] font-black inline-block">
+                      ★ ${topActive[1] ? topActive[1].total_points : '0'}
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 1st Place (Gold Medal & Crown) -->
+                <div class="flex flex-col items-center space-y-1.5 text-center pb-3.5 bg-gradient-to-t from-yellow-500/5 to-slate-950/30 border-2 border-yellow-500/40 rounded-2xl p-2 h-44 justify-end relative shadow-[0_0_15px_rgba(234,179,8,0.15)]">
+                  <div class="absolute -top-3 text-yellow-400 text-sm animate-bounce">👑</div>
+                  <span class="absolute top-1 left-2 text-[10px] text-yellow-400 font-bold font-mono">#1</span>
+                  <div class="relative">
+                    <div class="w-12 h-12 rounded-full bg-yellow-500/10 border-2 border-yellow-400 flex items-center justify-center text-yellow-400 font-bold text-sm shadow-lg shadow-yellow-500/10">
+                      🥇
+                    </div>
+                  </div>
+                  <div class="w-full">
+                    <p class="text-xs font-black text-white truncate">${topActive[0] ? topActive[0].name : '---'}</p>
+                    <p class="text-[8px] text-yellow-400 font-bold font-mono truncate">${topActive[0] ? '🔥 ' + topActive[0].current_streak + ' d streak' : 'খালি স্লট'}</p>
+                    <div class="mt-1 bg-yellow-400 text-slate-950 rounded-xl px-2 py-0.5 text-[9px] font-black inline-block shadow-md">
+                      ★ ${topActive[0] ? topActive[0].total_points : '0'}
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 3rd Place (Bronze Medal) -->
+                <div class="flex flex-col items-center space-y-1.5 text-center pb-2.5 bg-slate-950/20 border border-slate-850 rounded-xl p-2 h-32 justify-end relative">
+                  <span class="absolute top-1 left-2 text-[10px] text-amber-700 font-bold font-mono">#3</span>
+                  <div class="relative">
+                    <div class="w-10 h-10 rounded-full bg-slate-850 border-2 border-amber-600 flex items-center justify-center text-amber-500 font-bold text-xs shadow-md">
+                      🥉
+                    </div>
+                  </div>
+                  <div class="w-full">
+                    <p class="text-[10px] font-black text-slate-200 truncate">${topActive[2] ? topActive[2].name : '---'}</p>
+                    <p class="text-[8px] text-slate-500 font-bold font-mono truncate">${topActive[2] ? '🔥 ' + topActive[2].current_streak + ' d streak' : 'খালি স্লট'}</p>
+                    <div class="mt-1 bg-amber-600/10 border border-amber-600/20 text-amber-500 rounded px-1.5 py-0.5 text-[9px] font-black inline-block">
+                      ★ ${topActive[2] ? topActive[2].total_points : '0'}
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+
+              <div class="space-y-2 max-h-[320px] overflow-y-auto pr-1">
+                ${activeList.length > 0 ? activeList.map((m, idx) => `
+                  <div class="flex items-center justify-between bg-slate-950/40 hover:bg-slate-950 border border-slate-850 hover:border-slate-800 p-3 rounded-xl transition duration-150">
+                    <div class="flex items-center gap-3">
+                      <div class="w-6 h-6 rounded-full bg-slate-950 border border-slate-850 flex items-center justify-center text-[10px] font-bold ${
+                        idx === 0 ? 'text-yellow-400 bg-yellow-400/5' :
+                        idx === 1 ? 'text-slate-300 bg-slate-300/5' :
+                        idx === 2 ? 'text-amber-600 bg-amber-600/5' : 'text-slate-500'
+                      }">${idx + 1}</div>
+                      <div>
+                        <p class="text-xs font-bold text-slate-200">${m.name}</p>
+                        <p class="text-[9px] text-slate-500 font-medium">Lvl: ${m.level} | ID: #${m.member_number}</p>
+                      </div>
+                    </div>
+                    <div class="text-right">
+                      <p class="text-xs font-extrabold text-indigo-400 flex items-center justify-end gap-1">
+                        <span>★</span> ${m.total_points}
+                      </p>
+                      <p class="text-[10px] text-slate-500 mt-0.5 flex items-center justify-end gap-1 font-mono">
+                        🔥 ${m.current_streak} days streak
+                      </p>
+                    </div>
+                  </div>
+                `).join('') : `
+                  <p class="text-xs text-slate-600 text-center py-8">কোনো সক্রিয় মেম্বার পাওয়া যায়নি!</p>
+                `}
+              </div>
+            </div>
+
+            <!-- Right: Inactive Leaderboards list -->
+            <div class="bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-4">
+              <div class="flex flex-col sm:flex-row justify-between sm:items-center border-b border-slate-800 pb-3 gap-2">
+                <div class="flex items-center gap-2">
+                  <div class="w-8 h-8 rounded-lg bg-rose-500/10 flex items-center justify-center text-rose-400">
+                    <i data-lucide="shield-alert" class="w-4.5 h-4.5 text-rose-400"></i>
+                  </div>
+                  <div>
+                    <h3 class="font-bold text-slate-100 text-sm uppercase tracking-wide">২. নিষ্ক্রিয় মেম্বার লিডারবোর্ড (Inactive)</h3>
+                    <p class="text-[10px] text-slate-500">সবচেয়ে বেশি দিন ধরে লিংক প্রদান না করা নিষ্ক্রিয় মেম্বারগণ</p>
+                  </div>
+                </div>
+
+                <div>
+                  <select id="leaderboard-inactive-filter" class="bg-transparent border-0 text-[11px] text-slate-400 focus:outline-none cursor-pointer font-medium">
+                    <option value="3" ${state.leaderboardInactiveThreshold === 3 ? 'selected' : ''}>৩+ দিন ইনেক্টিভ</option>
+                    <option value="5" ${state.leaderboardInactiveThreshold === 5 ? 'selected' : ''}>৫+ দিন ইনেক্টিভ</option>
+                    <option value="7" ${state.leaderboardInactiveThreshold === 7 ? 'selected' : ''}>৭+ দিন (চূড়ান্ত ওয়ার্নিং)</option>
+                    <option value="12" ${state.leaderboardInactiveThreshold === 12 ? 'selected' : ''}>১২+ দিন (রিমুভযোগ্য)</option>
+                  </select>
+                </div>
+              </div>
+
+              <!-- Top 3 Inactive Warning Podium -->
+              <div class="grid grid-cols-3 gap-2 items-end pt-2 pb-5 border-b border-slate-850/60">
+                
+                <!-- 2nd Most Inactive -->
+                <div class="flex flex-col items-center space-y-1.5 text-center pb-2.5 bg-slate-950/20 border border-slate-850 rounded-xl p-2 h-36 justify-end relative">
+                  <span class="absolute top-1 left-2 text-[10px] text-rose-400 font-bold font-mono">#2</span>
+                  <div class="relative">
+                    <div class="w-10 h-10 rounded-full bg-slate-900 border-2 border-rose-500/50 flex items-center justify-center text-rose-400 font-bold text-xs shadow-md">
+                      ⚠️
+                    </div>
+                  </div>
+                  <div class="w-full">
+                    <p class="text-[10px] font-black text-slate-200 truncate">${topInactive[1] ? topInactive[1].name : '---'}</p>
+                    <p class="text-[8px] text-rose-400/80 font-bold font-mono truncate">${topInactive[1] ? 'Level: ' + topInactive[1].level : 'খালি স্লট'}</p>
+                    <div class="mt-1 bg-rose-500/10 border border-rose-500/20 text-rose-400 rounded px-1.5 py-0.5 text-[9px] font-black inline-block">
+                      ${topInactive[1] ? topInactive[1].consecutive_inactive_days + ' দিন' : '0 দিন'}
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 1st Most Inactive -->
+                <div class="flex flex-col items-center space-y-1.5 text-center pb-3.5 bg-gradient-to-t from-rose-950/15 to-slate-950/30 border-2 border-rose-600/50 rounded-2xl p-2 h-44 justify-end relative shadow-[0_0_15px_rgba(239,68,68,0.15)]">
+                  <div class="absolute -top-3 text-rose-500 text-[9px] font-bold bg-rose-950/90 border border-rose-500/40 px-2 py-0.5 rounded-full uppercase tracking-wider animate-pulse">💀 Danger</div>
+                  <span class="absolute top-1 left-2 text-[10px] text-rose-500 font-bold font-mono">#1</span>
+                  <div class="relative">
+                    <div class="w-12 h-12 rounded-full bg-rose-500/10 border-2 border-rose-500 flex items-center justify-center text-rose-500 font-bold text-sm shadow-lg shadow-rose-500/10">
+                      🚨
+                    </div>
+                  </div>
+                  <div class="w-full">
+                    <p class="text-xs font-black text-white truncate">${topInactive[0] ? topInactive[0].name : '---'}</p>
+                    <p class="text-[8px] text-rose-400 font-bold font-mono truncate">${topInactive[0] ? 'Level: ' + topInactive[0].level : 'খালি স্লট'}</p>
+                    <div class="mt-1 bg-rose-600 text-white rounded-xl px-2 py-0.5 text-[9px] font-black inline-block shadow-md">
+                      ${topInactive[0] ? topInactive[0].consecutive_inactive_days + ' দিন ' : '0 দিন'}
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 3rd Most Inactive -->
+                <div class="flex flex-col items-center space-y-1.5 text-center pb-2.5 bg-slate-950/20 border border-slate-850 rounded-xl p-2 h-32 justify-end relative">
+                  <span class="absolute top-1 left-2 text-[10px] text-orange-400 font-bold font-mono">#3</span>
+                  <div class="relative">
+                    <div class="w-10 h-10 rounded-full bg-slate-900 border-2 border-orange-500/50 flex items-center justify-center text-orange-400 font-bold text-xs shadow-md">
+                      💤
+                    </div>
+                  </div>
+                  <div class="w-full">
+                    <p class="text-[10px] font-black text-slate-200 truncate">${topInactive[2] ? topInactive[2].name : '---'}</p>
+                    <p class="text-[8px] text-orange-400/80 font-bold font-mono truncate">${topInactive[2] ? 'Level: ' + topInactive[2].level : 'খালি স্লট'}</p>
+                    <div class="mt-1 bg-orange-500/10 border border-orange-500/20 text-orange-400 rounded px-1.5 py-0.5 text-[9px] font-black inline-block">
+                      ${topInactive[2] ? topInactive[2].consecutive_inactive_days + ' দিন' : '0 দিন'}
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+
+              <div class="space-y-2 max-h-[320px] overflow-y-auto pr-1">
+                ${inactiveList.length > 0 ? inactiveList.map((m, idx) => `
+                  <div class="flex items-center justify-between bg-slate-950/40 hover:bg-slate-950 border border-slate-850 hover:border-slate-800 p-3 rounded-xl transition duration-150">
+                    <div class="flex items-center gap-3">
+                      <div class="w-6 h-6 rounded-full bg-slate-950 border border-slate-800 flex items-center justify-center text-[10px] font-bold text-rose-400">${idx + 1}</div>
+                      <div>
+                        <p class="text-xs font-bold text-slate-200">${m.name}</p>
+                        <p class="text-[9px] text-slate-500 font-medium">ID: #${m.member_number} | Level: ${m.level}</p>
+                      </div>
+                    </div>
+                    <div class="text-right">
+                      <p class="text-xs font-extrabold text-rose-400 font-mono">${m.consecutive_inactive_days} দিন ইনেক্টিভ</p>
+                      <p class="text-[9px] text-slate-500 mt-0.5">শেষ একটিভ: ${m.last_active_date || 'কখনো নয়'}</p>
+                    </div>
+                  </div>
+                `).join('') : `
+                  <p class="text-xs text-slate-600 text-center py-8">কোনো নিষ্ক্রিয় মেম্বার পাওয়া যায়নি!</p>
+                `}
+              </div>
+            </div>
+
+          </div>
+        </div>
+      `;
+    }
+
+    // TAB: MEMBER STATS REPORT GENERATOR
+    case 'reports': {
+      const filteredForReports = state.members.filter(m => 
+        m.name.toLowerCase().includes(state.reportSearchQuery.toLowerCase()) || 
+        m.display_name.toLowerCase().includes(state.reportSearchQuery.toLowerCase()) ||
+        m.member_number.toString() === state.reportSearchQuery
+      );
+
+      const selectedMember = state.members.find(m => m.id === state.reportSelectedMemberId);
+      const allBadges = getBadges().filter(b => b.member_id === state.reportSelectedMemberId);
+      const allLogs = getActivityLogs()
+        .filter(l => l.member_id === state.reportSelectedMemberId)
+        .sort((a, b) => new Date(b.activity_date).getTime() - new Date(a.activity_date).getTime());
+
+      return `
+        <div id="stats-report-section" class="space-y-6">
+          <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            
+            <!-- Left Side: Member Selector list panel -->
+            <div class="lg:col-span-4 bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-xl flex flex-col space-y-4">
+              <div class="border-b border-slate-800 pb-2">
+                <h3 class="font-bold text-slate-100 text-sm tracking-wide uppercase">মেম্বার সিলেক্ট করুন</h3>
+                <p class="text-[11px] text-slate-400 mt-1">ব্যক্তিগত অ্যাক্টিভিটি রিপোর্ট তৈরি এবং ডাউনলোড করতে মেম্বার সিলেক্ট করুন।</p>
+              </div>
+
+              <div class="relative">
+                <i data-lucide="search" class="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2"></i>
+                <input id="report-search" type="text" value="${state.reportSearchQuery}" placeholder="নাম বা মেম্বার আইডি লিখুন..." class="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-300 focus:outline-none focus:border-indigo-500 placeholder-slate-700 font-mono" />
+              </div>
+
+              <div class="space-y-1.5 max-h-[350px] overflow-y-auto pr-1">
+                ${filteredForReports.map(m => {
+                  const isSelected = m.id === state.reportSelectedMemberId;
+                  return `
+                    <button data-select-report-member="${m.id}" class="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-left transition duration-150 border cursor-pointer ${
+                      isSelected 
+                        ? 'bg-indigo-600/10 text-indigo-400 border-indigo-500/20' 
+                        : 'bg-slate-950/40 text-slate-300 border-transparent hover:bg-slate-850'
+                    }">
+                      <div>
+                        <p class="text-xs font-bold">${m.name}</p>
+                        <p class="text-[10px] text-slate-500 mt-0.5 font-mono">No.${m.member_number} | Level: ${m.level}</p>
+                      </div>
+                      <span class="text-[9px] px-1.5 py-0.5 font-bold uppercase rounded ${
+                        m.status === 'active' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'
+                      }">${m.status}</span>
+                    </button>
+                  `;
+                }).join('')}
+                ${filteredForReports.length === 0 ? '<p class="text-xs text-slate-600 text-center py-8">কোনো মেম্বার পাওয়া যায়নি!</p>' : ''}
+              </div>
+            </div>
+
+            <!-- Right Side: Certificate Card Frame -->
+            <div class="lg:col-span-8 flex flex-col space-y-4">
+              ${selectedMember ? `
+                <div class="space-y-4">
+                  <!-- Printable report card block -->
+                  <div id="printable-report-card" class="bg-slate-950 border border-slate-800 rounded-2xl p-6 md:p-8 shadow-2xl relative overflow-hidden space-y-6">
+                    <div class="absolute right-0 top-0 w-64 h-64 bg-indigo-500/5 rounded-full blur-3xl -z-10 pointer-events-none"></div>
+                    <div class="absolute left-10 bottom-0 w-64 h-64 bg-emerald-500/5 rounded-full blur-3xl -z-10 pointer-events-none"></div>
+
+                    <!-- Header -->
+                    <div class="flex flex-col sm:flex-row justify-between sm:items-start border-b border-slate-800 pb-5 gap-3">
+                      <div>
+                        <span class="text-[10px] bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">
+                          Official Performance Card
+                        </span>
+                        <h2 class="text-xl md:text-2xl font-extrabold text-slate-100 mt-2 flex items-center gap-2">
+                          ${selectedMember.name}
+                        </h2>
+                        <p class="text-xs font-semibold text-slate-500 mt-0.5">${selectedMember.display_name}</p>
+                      </div>
+                      <div class="text-left sm:text-right font-mono">
+                        <p class="text-xs text-slate-400 font-bold uppercase">Member Number</p>
+                        <p class="text-xl font-black text-indigo-400 mt-1">#${selectedMember.member_number}</p>
+                      </div>
+                    </div>
+
+                    <!-- Stats grid -->
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      <div class="bg-slate-900/60 border border-slate-800 p-3.5 rounded-xl text-center space-y-1">
+                        <i data-lucide="award" class="w-5 h-5 mx-auto text-yellow-400"></i>
+                        <p class="text-[9px] text-slate-500 uppercase font-bold">Total Points</p>
+                        <p class="text-base font-black text-slate-200 font-mono">${selectedMember.total_points} Pts</p>
+                      </div>
+                      <div class="bg-slate-900/60 border border-slate-800 p-3.5 rounded-xl text-center space-y-1">
+                        <i data-lucide="flame" class="w-5 h-5 mx-auto text-rose-500 animate-pulse"></i>
+                        <p class="text-[9px] text-slate-500 uppercase font-bold">Current Streak</p>
+                        <p class="text-base font-black text-rose-400 font-mono">${selectedMember.current_streak} Days</p>
+                      </div>
+                      <div class="bg-slate-900/60 border border-slate-800 p-3.5 rounded-xl text-center space-y-1">
+                        <i data-lucide="sparkles" class="w-5 h-5 mx-auto text-indigo-400"></i>
+                        <p class="text-[9px] text-slate-500 uppercase font-bold">Longest Streak</p>
+                        <p class="text-base font-black text-indigo-400 font-mono">${selectedMember.longest_streak} Days</p>
+                      </div>
+                      <div class="bg-slate-900/60 border border-slate-800 p-3.5 rounded-xl text-center space-y-1">
+                        <i data-lucide="shield" class="w-5 h-5 mx-auto text-emerald-400"></i>
+                        <p class="text-[9px] text-slate-500 uppercase font-bold">Group Level</p>
+                        <p class="text-base font-black text-emerald-400 font-mono">${selectedMember.level}</p>
+                      </div>
+                    </div>
+
+                    <!-- Diagnostics section -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 border-t border-slate-800 pt-5">
+                      <div class="space-y-2">
+                        <p class="text-xs font-bold text-slate-400 uppercase tracking-wide">Activity Diagnostics</p>
+                        <ul class="text-xs space-y-2">
+                          <li class="flex justify-between border-b border-slate-800/50 pb-1.5">
+                            <span class="text-slate-500">Status:</span>
+                            <span class="font-bold capitalize ${selectedMember.status === 'active' ? 'text-emerald-400' : 'text-rose-400'}">● ${selectedMember.status}</span>
+                          </li>
+                          <li class="flex justify-between border-b border-slate-800/50 pb-1.5">
+                            <span class="text-slate-500">Total Active Days:</span>
+                            <span class="text-slate-200 font-bold font-mono">${selectedMember.total_active_days} দিন</span>
+                          </li>
+                          <li class="flex justify-between border-b border-slate-800/50 pb-1.5">
+                            <span class="text-slate-500">Inactivity Counter:</span>
+                            <span class="text-rose-400 font-bold font-mono">${selectedMember.consecutive_inactive_days} দিন</span>
+                          </li>
+                          <li class="flex justify-between">
+                            <span class="text-slate-500">Last Submission Date:</span>
+                            <span class="text-slate-300 font-bold font-mono">${selectedMember.last_active_date || 'N/A'}</span>
+                          </li>
+                        </ul>
+                      </div>
+
+                      <div class="bg-slate-900/40 border border-slate-800 p-4 rounded-xl flex flex-col justify-between">
+                        <p class="text-xs font-bold text-slate-400 uppercase tracking-wide mb-2 flex items-center gap-1">
+                          <i data-lucide="award" class="w-4 h-4 text-yellow-500"></i> Earned Badges (${allBadges.length})
+                        </p>
+                        ${allBadges.length > 0 ? `
+                          <div class="flex flex-wrap gap-2 overflow-y-auto max-h-24">
+                            ${allBadges.map(b => `
+                              <span class="bg-slate-950 border border-slate-800 px-2 py-1 rounded text-[10px] font-bold text-slate-300 font-mono">${b.badge_name}</span>
+                            `).join('')}
+                          </div>
+                        ` : `
+                          <p class="text-[11px] text-slate-500 italic py-2">কোনো ব্যাজ অর্জন করা হয়নি!</p>
+                        `}
+                        <div class="border-t border-slate-800/50 pt-2 text-[10px] text-slate-500 font-mono">
+                          Generated: ${new Date().toISOString().split('T')[0]} | Support Link Box
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Action triggers -->
+                  <div class="flex gap-3 justify-end">
+                    <button id="download-report-png" class="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold text-xs px-6 py-3 rounded-xl shadow-[0_4px_12px_rgba(79,70,229,0.3)] transition-all flex items-center justify-center gap-1.5 cursor-pointer" ${state.isDownloadingReport ? 'disabled' : ''}>
+                      <i data-lucide="download" class="w-4 h-4"></i>
+                      ${state.isDownloadingReport ? 'Downloading Image...' : 'Download Report as PNG'}
+                    </button>
+                  </div>
+
+                  <!-- Submission Logs history list -->
+                  <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl">
+                    <h3 class="font-bold text-slate-200 text-xs tracking-wider uppercase mb-3 flex items-center gap-1">
+                      <i data-lucide="check-circle" class="w-4 h-4 text-emerald-400"></i> Recent Submission Logs
+                    </h3>
+                    <div class="max-h-40 overflow-y-auto space-y-1.5 pr-1 divide-y divide-slate-850/50">
+                      ${allLogs.length > 0 ? allLogs.map(log => `
+                        <div class="flex justify-between items-center text-xs py-2 font-mono">
+                          <span class="text-slate-300">${log.activity_date}</span>
+                          <div class="flex items-center gap-2">
+                            <span class="text-[10px] bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded font-bold uppercase">Success</span>
+                            <span class="text-[10px] text-slate-500">Submitted by: ${log.submitted_by}</span>
+                          </div>
+                        </div>
+                      `).join('') : `
+                        <p class="text-xs text-slate-500 italic py-4 text-center">এখনো কোনো লিংক সাবমিট ইতিহাস রেকর্ড করা হয়নি!</p>
+                      `}
+                    </div>
+                  </div>
+
+                </div>
+              ` : `
+                <div class="flex flex-col items-center justify-center py-24 bg-slate-900 border border-slate-800 rounded-2xl text-center text-slate-500">
+                  <i data-lucide="help-circle" class="w-14 h-14 text-slate-700 mb-3"></i>
+                  <p class="font-semibold text-slate-400 text-sm">কোনো মেম্বার সিলেক্ট করা নেই</p>
+                  <p class="text-xs text-slate-500 max-w-xs mt-1">
+                    বাম পাশের প্যানেল থেকে যেকোনো মেম্বারের ওপর ক্লিক করে তার সার্টিফিকেট রিপোর্ট কার্ড এবং PNG ডাউনলোড অপশন চালু করুন।
+                  </p>
+                </div>
+              `}
+            </div>
+
+          </div>
+        </div>
+      `;
+    }
+
+    // TAB: SUPABASE SETUP CONNECTION GUIDE
+    case 'supabase': {
+      if (!state.developerUnlocked) {
+        return `
+          <div class="max-w-md mx-auto my-12 bg-slate-900 border border-slate-800 p-8 rounded-2xl shadow-2xl space-y-6 text-center">
+            <div class="inline-flex items-center justify-center p-4 bg-indigo-500/10 rounded-full mb-2">
+              <i data-lucide="lock" class="w-8 h-8 text-indigo-400"></i>
+            </div>
+            
+            <div class="space-y-2">
+              <h3 class="font-bold text-slate-100 text-xl">Developer Section Locked</h3>
+              <p class="text-xs text-slate-400 leading-relaxed">
+                এই সেকশনে প্রবেশের জন্য সিকিউরিটি পাসওয়ার্ড প্রদান করুন।
+              </p>
+            </div>
+
+            <div class="space-y-4">
+              <div>
+                <input type="password" id="dev-password-gate-input" placeholder="পাসওয়ার্ড লিখুন" class="w-full bg-slate-950 border border-slate-800 px-4 py-3 rounded-xl text-xs text-slate-200 focus:outline-none focus:border-indigo-500 font-mono text-center tracking-widest" />
+                <p id="dev-password-error" class="hidden text-rose-400 text-[10px] mt-1.5 font-semibold"></p>
+              </div>
+
+              <button id="dev-password-submit-btn" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xs py-3 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2">
+                <i data-lucide="unlock" class="w-4 h-4"></i> প্রবেশ করুন
+              </button>
+            </div>
+          </div>
+        `;
+      }
+
+      const sqlSchema = `-- ১. Members টেবিল তৈরি করুন
+CREATE TABLE members (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  display_name TEXT,
+  member_number SERIAL,
+  status TEXT DEFAULT 'active',
+  level TEXT DEFAULT 'Bronze',
+  total_points INTEGER DEFAULT 0,
+  current_streak INTEGER DEFAULT 0,
+  longest_streak INTEGER DEFAULT 0,
+  total_active_days INTEGER DEFAULT 0,
+  last_active_date TEXT,
+  consecutive_inactive_days INTEGER DEFAULT 0,
+  notes TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now())
+);
+
+-- ২. Activity Logs (দৈনিক লিংক প্রদানের রেকর্ড) টেবিল তৈরি করুন
+CREATE TABLE activity_logs (
+  id TEXT PRIMARY KEY,
+  member_id TEXT REFERENCES members(id) ON DELETE CASCADE,
+  activity_date TEXT NOT NULL,
+  is_active BOOLEAN DEFAULT TRUE,
+  points_earned INTEGER DEFAULT 10,
+  submitted_by TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now())
+);
+
+-- ৩. Badges (অর্জিত মেডেল ও সম্মাননা) টেবিল তৈরি করুন
+CREATE TABLE badges (
+  id TEXT PRIMARY KEY,
+  member_id TEXT REFERENCES members(id) ON DELETE CASCADE,
+  badge_type TEXT NOT NULL,
+  badge_name TEXT NOT NULL,
+  earned_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now())
+);
+
+-- ৪. Audit Trails (এডমিন একশন হিস্ট্রি) টেবিল তৈরি করুন
+CREATE TABLE audit_trails (
+  id TEXT PRIMARY KEY,
+  admin_email TEXT NOT NULL,
+  admin_name TEXT,
+  action TEXT NOT NULL,
+  entity_type TEXT NOT NULL,
+  description TEXT,
+  timestamp TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now())
+);`;
+
+      const reactIntegrationCode = `import { createClient } from '@supabase/supabase-base-js';
+
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
+// Synchronize Database with Supabase
+export async function fetchSupabaseMembers() {
+  const { data, error } = await supabase
+    .from('members')
+    .select('*')
+    .order('member_number', { ascending: true });
+    
+  if (error) console.error('Error fetching members:', error);
+  return data || [];
+}`;
+
+      // Connection badge / status bar
+      let connectionStatusBadge = '';
+      if (state.supabaseConnectionStatus === 'idle' || !state.supabaseUrl) {
+        connectionStatusBadge = `
+          <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800 text-slate-400 text-xs font-semibold">
+            <span class="w-2 h-2 rounded-full bg-slate-500 animate-pulse"></span>
+            সেটআপ করা নেই (Unconfigured)
+          </div>
+        `;
+      } else if (state.supabaseConnectionStatus === 'connecting') {
+        connectionStatusBadge = `
+          <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-500/10 text-amber-400 text-xs font-semibold border border-amber-500/20">
+            <span class="w-2 h-2 rounded-full bg-amber-400 animate-ping"></span>
+            সংযোগ পরীক্ষা হচ্ছে...
+          </div>
+        `;
+      } else if (state.supabaseConnectionStatus === 'connected') {
+        connectionStatusBadge = `
+          <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 text-xs font-semibold border border-emerald-500/20">
+            <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+            সংযুক্ত আছে (Connected)
+          </div>
+        `;
+      } else if (state.supabaseConnectionStatus === 'error') {
+        connectionStatusBadge = `
+          <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-rose-500/10 text-rose-400 text-xs font-semibold border border-rose-500/20">
+            <span class="w-2 h-2 rounded-full bg-rose-500 animate-pulse"></span>
+            সংযোগ ত্রুটি!
+          </div>
+        `;
+      }
+
+      return `
+        <div class="space-y-6">
+          <!-- Live connection control center -->
+          <div class="bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-6">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+              <div class="flex items-center gap-3">
+                <div class="p-2 bg-indigo-500/10 rounded-xl">
+                  <i data-lucide="database" class="w-6 h-6 text-indigo-400"></i>
+                </div>
+                <div>
+                  <h3 class="font-bold text-slate-100 text-lg">Supabase লাইভ কানেকশন ও সিংক্রোনাইজেশন</h3>
+                  <p class="text-xs text-slate-400 mt-0.5">আপনার ক্লাউড ডাটাবেজের সাথে লোকাল মেম্বার ও লিংক হিস্ট্রি লাইভ সিঙ্ক করুন</p>
+                </div>
+              </div>
+              <div class="flex items-center">
+                ${connectionStatusBadge}
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+              <!-- Credentials Form Box -->
+              <div class="lg:col-span-7 space-y-4">
+                <div class="flex items-center justify-between gap-2 flex-wrap">
+                  <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                    <i data-lucide="key-round" class="w-3.5 h-3.5 text-indigo-400"></i> API ক্রেডেনশিয়ালস
+                  </h4>
+                  ${state.loadedFromEnv ? `
+                    <div class="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-500/10 text-indigo-400 text-[10px] font-bold border border-indigo-500/20">
+                      <i data-lucide="shield-check" class="w-3.5 h-3.5 text-indigo-400 animate-pulse"></i>
+                      এনভায়রনমেন্ট সিক্রেটস থেকে সক্রিয়
+                    </div>
+                  ` : ''}
+                </div>
+                
+                <div class="space-y-3">
+                  <div>
+                    <label class="block text-[11px] text-slate-400 font-bold mb-1.5 uppercase tracking-wide">Supabase Project URL</label>
+                    <div class="relative flex items-center">
+                      <input type="${state.showUrlInput ? 'text' : 'password'}" id="supabase-url-input" class="w-full bg-slate-950 border border-slate-800 pl-3.5 pr-10 py-2.5 rounded-xl text-xs text-slate-200 focus:outline-none focus:border-indigo-500 font-mono" placeholder="https://your-project.supabase.co" value="${state.supabaseUrl || ''}" />
+                      <button id="toggle-url-visibility-btn" type="button" class="absolute right-3 text-slate-500 hover:text-slate-300 focus:outline-none cursor-pointer">
+                        <i data-lucide="${state.showUrlInput ? 'eye-off' : 'eye'}" class="w-4 h-4"></i>
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <label class="block text-[11px] text-slate-400 font-bold mb-1.5 uppercase tracking-wide">Supabase Anon/Public Key</label>
+                    <div class="relative flex items-center">
+                      <input type="${state.showKeyInput ? 'text' : 'password'}" id="supabase-key-input" class="w-full bg-slate-950 border border-slate-800 pl-3.5 pr-10 py-2.5 rounded-xl text-xs text-slate-200 focus:outline-none focus:border-indigo-500 font-mono" placeholder="your-anon-or-service-role-key" value="${state.supabaseKey || ''}" />
+                      <button id="toggle-key-visibility-btn" type="button" class="absolute right-3 text-slate-500 hover:text-slate-300 focus:outline-none cursor-pointer">
+                        <i data-lucide="${state.showKeyInput ? 'eye-off' : 'eye'}" class="w-4 h-4"></i>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="flex flex-wrap items-center justify-between gap-4 pt-2">
+                  <div class="flex items-center gap-2">
+                    <button id="save-supabase-config-btn" class="text-xs px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 rounded-xl text-white font-bold transition-all cursor-pointer flex items-center gap-2">
+                      <i data-lucide="save" class="w-4 h-4"></i> সেভ ও টেস্ট
+                    </button>
+                    ${state.supabaseUrl || state.supabaseKey ? `
+                      <button id="clear-supabase-config-btn" class="text-xs px-3 py-2.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-xl font-bold border border-rose-500/20 transition-all cursor-pointer flex items-center gap-1.5" title="ক্রেডেনশিয়ালস মুছুন">
+                        <i data-lucide="trash-2" class="w-3.5 h-3.5"></i> মুছুন
+                      </button>
+                    ` : ''}
+                    ${state.supabaseUrl && state.supabaseKey ? `
+                      <button id="test-connection-btn" class="text-xs px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl font-bold border border-slate-700 transition-all cursor-pointer">
+                        টেস্ট কানেকশন
+                      </button>
+                    ` : ''}
+                  </div>
+
+                  <!-- Auto sync toggle -->
+                  <div class="flex items-center gap-2">
+                    <label class="relative inline-flex items-center cursor-pointer">
+                      <input type="checkbox" id="supabase-autosync-toggle" class="sr-only peer" ${state.supabaseSyncEnabled ? 'checked' : ''} />
+                      <div class="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-slate-400 after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600 peer-checked:after:bg-white"></div>
+                      <span class="ml-2 text-xs font-bold text-slate-300">অটো ব্যাকগ্রাউন্ড সিঙ্ক</span>
+                    </label>
+                  </div>
+                </div>
+
+                ${state.supabaseConnectionError ? `
+                  <div class="p-3 bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs rounded-xl font-mono leading-relaxed max-h-32 overflow-y-auto">
+                    <strong>কানেকশন ইরর:</strong> ${state.supabaseConnectionError}
+                  </div>
+                ` : ''}
+              </div>
+
+              <!-- Manual Sync Operations Box -->
+              <div class="lg:col-span-5 bg-slate-950 p-5 rounded-xl border border-slate-800/80 flex flex-col justify-between">
+                <div class="space-y-2">
+                  <h4 class="text-xs font-bold text-indigo-400 uppercase tracking-wider flex items-center gap-1.5">
+                    <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> ম্যানুয়াল ডেটা সিংক্রোনাইজেশন
+                  </h4>
+                  <p class="text-[11px] text-slate-400 leading-relaxed">
+                    নিচের একশনগুলোর সাহায্যে আপনার লোকাল ব্রাউজারের ডাটাবেজ এবং ক্লাউড Supabase ডাটাবেজ ম্যানুয়ালি ট্রান্সফার বা সিঙ্ক করতে পারবেন।
+                  </p>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3 mt-4">
+                  <!-- Push local data to supabase -->
+                  <button id="push-supabase-btn" class="flex flex-col items-center justify-center p-4 bg-slate-900/60 hover:bg-slate-900 border border-slate-800/80 rounded-xl text-center group cursor-pointer transition-all ${state.supabaseSyncing ? 'opacity-50 pointer-events-none' : ''}">
+                    <i data-lucide="cloud-lightning" class="w-6 h-6 text-indigo-400 group-hover:scale-110 transition-transform mb-2"></i>
+                    <span class="text-xs font-bold text-slate-200">Push to Cloud</span>
+                    <span class="text-[10px] text-slate-500 mt-1">লোকাল ডাটা আপলোড</span>
+                  </button>
+
+                  <!-- Pull supabase data to local -->
+                  <button id="pull-supabase-btn" class="flex flex-col items-center justify-center p-4 bg-slate-900/60 hover:bg-slate-900 border border-slate-800/80 rounded-xl text-center group cursor-pointer transition-all ${state.supabaseSyncing ? 'opacity-50 pointer-events-none' : ''}">
+                    <i data-lucide="cloud-download" class="w-6 h-6 text-emerald-400 group-hover:scale-110 transition-transform mb-2"></i>
+                    <span class="text-xs font-bold text-slate-200">Pull to Local</span>
+                    <span class="text-[10px] text-slate-500 mt-1">ক্লাউড ডাটা ডাউনলোড</span>
+                  </button>
+                </div>
+
+                ${state.supabaseSyncing ? `
+                  <div class="text-[11px] text-indigo-400 font-semibold flex items-center justify-center gap-1.5 mt-3 animate-pulse">
+                    <i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin"></i> সিংক্রোনাইজেশন ডাটা ট্রান্সফার চলছে...
+                  </div>
+                ` : `
+                  <div class="text-[10px] text-slate-500 text-center mt-3 font-mono">
+                    সর্বশেষ সংযোগ পরীক্ষা: ${state.supabaseConnectionStatus === 'connected' ? 'সফল' : 'অসংজ্ঞায়িত'}
+                  </div>
+                `}
+              </div>
+            </div>
+          </div>
+
+          <!-- Connection Guide card -->
+          <div class="bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-4">
+            <div class="flex items-center gap-3 border-b border-slate-800 pb-3">
+              <i data-lucide="help-circle" class="w-6 h-6 text-indigo-400"></i>
+              <h3 class="font-bold text-slate-100 text-lg">Supabase ইন্টিগ্রেশন ও কানেকশন গাইড</h3>
+            </div>
+            <p class="text-sm text-slate-300 leading-relaxed">
+              হ্যাঁ, <strong class="text-indigo-400">Supabase</strong> দিয়ে এই সাপোর্ট লিংক模块টি রিয়েল-টাইম ডাটাবেজ ইন্টিগ্রেট করা সম্পূর্ণরূপে সম্ভব! আমরা পুরো ক্লায়েন্ট-সাইড স্কিমাটি এমনভাবে ডিজাইন করেছি যাতে এটি আপনার দেওয়া Supabase SQL স্কিমার সাথে হুবহু মিলে যায়। নিচে দেওয়া ধাপগুলো অনুসরণ করে আপনি এই লোকাল সিস্টেমটিকে Supabase এ সংযুক্ত করতে পারেন।
+            </p>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
+              <div class="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-1.5">
+                <span class="text-[10px] font-bold text-indigo-400 uppercase tracking-wider">ধাপ ১</span>
+                <p class="text-xs font-bold text-slate-200">Supabase এ নতুন প্রজেক্ট খুলুন</p>
+                <p class="text-[11px] text-slate-500">Supabase Dashboard এ গিয়ে ফ্রিতে একটি নতুন প্রজেক্ট তৈরি করুন।</p>
+              </div>
+              <div class="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-1.5">
+                <span class="text-[10px] font-bold text-indigo-400 uppercase tracking-wider">ধাপ ২</span>
+                <p class="text-xs font-bold text-slate-200">SQL স্কিমা রান করুন</p>
+                <p class="text-[11px] text-slate-500">SQL Editor-এ গিয়ে নিচে দেওয়া টেবিল তৈরির কোডগুলো পেস্ট করে রান করুন।</p>
+              </div>
+              <div class="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-1.5">
+                <span class="text-[10px] font-bold text-indigo-400 uppercase tracking-wider">ধাপ ৩</span>
+                <p class="text-xs font-bold text-slate-200">React Client কানেক্ট করুন</p>
+                <p class="text-[11px] text-slate-500">আপনার VITE পরিবেশের কীগুলো দিয়ে React API কলগুলোর মাধ্যমে সিংক্রোনাইজ করুন।</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- SQL code box -->
+          <div class="bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden">
+            <div class="p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
+              <span class="text-xs font-bold text-slate-400 flex items-center gap-1.5 font-mono uppercase tracking-wider">
+                <i data-lucide="terminal" class="w-3.5 h-3.5 text-indigo-400"></i> Supabase SQL Schema Script
+              </span>
+              <button id="copy-sql-btn" class="text-[10px] px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded text-white font-bold uppercase transition-all cursor-pointer">
+                ${state.copiedSQL ? 'Copied!' : 'Copy Script'}
+              </button>
+            </div>
+            <div class="p-4">
+              <pre class="bg-slate-950 text-emerald-400 font-mono text-[10px] leading-relaxed p-4 rounded-xl max-h-60 overflow-y-auto overflow-x-auto">${sqlSchema}</pre>
+            </div>
+          </div>
+
+          <!-- React Connection layer code box -->
+          <div class="bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden">
+            <div class="p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
+              <span class="text-xs font-bold text-slate-400 flex items-center gap-1.5 font-mono uppercase tracking-wider">
+                <i data-lucide="shield-check" class="w-3.5 h-3.5 text-indigo-400"></i> Ready-to-Use React API Layer
+              </span>
+              <button id="copy-js-btn" class="text-[10px] px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded text-white font-bold uppercase transition-all cursor-pointer">
+                ${state.copiedJS ? 'Copied!' : 'Copy Code'}
+              </button>
+            </div>
+            <div class="p-4">
+              <pre class="bg-slate-950 text-indigo-300 font-mono text-[10px] leading-relaxed p-4 rounded-xl max-h-60 overflow-y-auto overflow-x-auto">${reactIntegrationCode}</pre>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+  }
+}
+
+// Interactive Event binding to the generated HTML elements
+function bindEvents() {
+  
+  // Tab change button event delegation
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.onclick = (e) => {
+      const targetTab = e.currentTarget.getAttribute('data-tab');
+      updateState({ currentTab: targetTab });
+    };
+  });
+
+  // Admin selector changes
+  const selector = document.getElementById('admin-selector');
+  if (selector) {
+    selector.onchange = (e) => {
+      const email = e.target.value;
+      if (email === 'custom') {
+        const customEmail = prompt('এডমিনের ইমেইল প্রবেশ করান:');
+        if (customEmail && customEmail.includes('@')) {
+          const customName = prompt('এডমিনের পুরো নাম লিখুন:');
+          if (customName) {
+            ADMIN_NAMES[customEmail] = customName;
+          } else {
+            ADMIN_NAMES[customEmail] = customEmail.split('@')[0];
+          }
+          setCurrentAdmin(customEmail);
+          
+          // Add Audit log
+          const auditTrails = getAuditTrails();
+          auditTrails.unshift({
+            id: `audit-${Date.now()}`,
+            admin_email: customEmail,
+            admin_name: ADMIN_NAMES[customEmail],
+            action: 'ADD_ADMIN',
+            entity_type: 'SESSION',
+            description: `Registered and swapped active admin session to ${customEmail}`,
+            timestamp: new Date().toISOString()
+          });
+          saveAuditTrails(auditTrails);
+          loadStateFromStorage();
+          updateState({});
+        } else {
+          alert('সঠিক ইমেইল এড্রেস প্রদান করুন!');
+          updateState({});
+        }
+      } else {
+        setCurrentAdmin(email);
+        
+        // Add swap audit log
+        const auditTrails = getAuditTrails();
+        auditTrails.unshift({
+          id: `audit-${Date.now()}`,
+          admin_email: email,
+          admin_name: ADMIN_NAMES[email] || email.split('@')[0],
+          action: 'SWITCH_ADMIN',
+          entity_type: 'SESSION',
+          description: `Admin swapped active session to ${email}`,
+          timestamp: new Date().toISOString()
+        });
+        saveAuditTrails(auditTrails);
+        loadStateFromStorage();
+        updateState({});
+      }
+    };
+  }
+
+  // TAB EVENTS: MEMBERS
+  if (state.currentTab === 'members') {
+    
+    // Member search typing
+    const searchInp = document.getElementById('member-search-input');
+    if (searchInp) {
+      searchInp.oninput = (e) => {
+        updateState({ searchQueryMembers: e.target.value });
+        // Keep focus
+        const inp = document.getElementById('member-search-input');
+        if (inp) {
+          inp.focus();
+          inp.setSelectionRange(inp.value.length, inp.value.length);
+        }
+      };
+    }
+
+    // Filter statuses tabs selection
+    document.querySelectorAll('.filter-tab-btn').forEach(btn => {
+      btn.onclick = (e) => {
+        const filterVal = e.target.getAttribute('data-filter');
+        updateState({ memberFilterStatus: filterVal });
+      };
+    });
+
+    // Form registration submit handler
+    const addForm = document.getElementById('add-member-form');
+    if (addForm) {
+      addForm.onsubmit = (e) => {
+        e.preventDefault();
+        const textarea = document.getElementById('reg-name-input');
+        const rawNames = textarea.value.trim();
+        if (!rawNames) return;
+
+        const namesToRegister = [];
+        const lines = rawNames.split('\n').map(l => l.trim()).filter(Boolean);
+
+        lines.forEach(line => {
+          if (line.includes('@')) {
+            const regex = /@([^\r\n@]+)/g;
+            let match;
+            let lineAdded = false;
+            while ((match = regex.exec(line)) !== null) {
+              const parsed = match[1].trim();
+              if (parsed && parsed.length > 1) {
+                namesToRegister.push(parsed);
+                lineAdded = true;
+              }
+            }
+            // Fallback if line has @ but no valid mention was extracted
+            if (!lineAdded) {
+              const cleanedLine = line.replace(/@/g, '').trim();
+              if (cleanedLine && cleanedLine.length > 1) {
+                namesToRegister.push(cleanedLine);
+              }
+            }
+          } else {
+            // No @ on this line, treat the whole line as one name
+            if (line.length > 1) {
+              namesToRegister.push(line);
+            }
+          }
+        });
+
+        const countAdded = handleBulkAddMembers(namesToRegister);
+
+        if (countAdded > 0) {
+          showToast(`সফলভাবে ${countAdded} জন নতুন মেম্বার রেজিস্টার করা হয়েছে!`, 'success');
+          textarea.value = '';
+          updateState({ showRegisterModal: false });
+        } else {
+          showToast('কোনো নতুন মেম্বার রেজিস্টার করা যায়নি। হয়তো তারা ইতিমধ্যে রেজিস্টার্ড!', 'error');
+        }
+      };
+    }
+
+    // Clear demo / Reset database handler
+    const clearDemoBtn = document.getElementById('clear-demo-btn');
+    if (clearDemoBtn) {
+      clearDemoBtn.onclick = () => {
+        if (confirm('আপনি কি সত্যিই সমস্ত ডেমো মেম্বার এবং অ্যাক্টিভিটি ডেটা মুছে সম্পূর্ণ খালি করতে চান? এই একশনটি আর ফেরত আনা যাবে না!')) {
+          localStorage.removeItem(STORAGE_KEYS.MEMBERS);
+          localStorage.removeItem(STORAGE_KEYS.LOGS);
+          localStorage.removeItem(STORAGE_KEYS.AUDIT);
+          localStorage.removeItem(STORAGE_KEYS.BADGES);
+          
+          initializeDatabase();
+          loadStateFromStorage();
+          updateState({});
+          showToast('সাপোর্ট লিংক বক্স ডাটাবেজ সফলভাবে সম্পূর্ণ রিসেট করা হয়েছে!', 'success');
+        }
+      };
+    }
+
+    // Interactive Inline action buttons
+    document.querySelectorAll('[data-toggle-status]').forEach(btn => {
+      btn.onclick = (e) => {
+        const memberId = e.currentTarget.getAttribute('data-toggle-status');
+        const members = getMembers();
+        const mIdx = members.findIndex(m => m.id === memberId);
+        if (mIdx !== -1) {
+          const oldStatus = members[mIdx].status;
+          const newStatus = oldStatus === 'active' ? 'warning' : oldStatus === 'warning' ? 'inactive' : 'active';
+          members[mIdx].status = newStatus;
+          // Sync inactivity days representation
+          members[mIdx].consecutive_inactive_days = newStatus === 'active' ? 0 : newStatus === 'warning' ? 7 : 12;
+          members[mIdx].updated_at = new Date().toISOString();
+          saveMembers(members);
+
+          // Audit trail
+          const trails = getAuditTrails();
+          trails.unshift({
+            id: `audit-${Date.now()}`,
+            admin_email: state.currentAdminEmail,
+            admin_name: ADMIN_NAMES[state.currentAdminEmail] || 'Admin',
+            action: 'TOGGLE_STATUS',
+            entity_type: 'MEMBER',
+            description: `Toggled status for ${members[mIdx].name} to: ${newStatus}`,
+            timestamp: new Date().toISOString()
+          });
+          saveAuditTrails(trails);
+
+          loadStateFromStorage();
+          updateState({});
+        }
+      };
+    });
+
+    document.querySelectorAll('[data-reset-stats]').forEach(btn => {
+      btn.onclick = (e) => {
+        const memberId = e.currentTarget.getAttribute('data-reset-stats');
+        if (!confirm('আপনি কি সত্যিই এই মেম্বারের অর্জিত পয়েন্ট, লেভেল এবং স্ট্রেইক শুন্য (0) করতে চান?')) return;
+        
+        const members = getMembers();
+        const mIdx = members.findIndex(m => m.id === memberId);
+        if (mIdx !== -1) {
+          members[mIdx].total_points = 0;
+          members[mIdx].current_streak = 0;
+          members[mIdx].longest_streak = 0;
+          members[mIdx].total_active_days = 0;
+          members[mIdx].level = 'Bronze';
+          members[mIdx].consecutive_inactive_days = 0;
+          members[mIdx].status = 'active';
+          members[mIdx].updated_at = new Date().toISOString();
+          saveMembers(members);
+
+          // Audit
+          const trails = getAuditTrails();
+          trails.unshift({
+            id: `audit-${Date.now()}`,
+            admin_email: state.currentAdminEmail,
+            admin_name: ADMIN_NAMES[state.currentAdminEmail],
+            action: 'RESET_MEMBER',
+            entity_type: 'MEMBER',
+            description: `Reset all activity points and streaks to zero for: ${members[mIdx].name}`,
+            timestamp: new Date().toISOString()
+          });
+          saveAuditTrails(trails);
+
+          loadStateFromStorage();
+          updateState({});
+        }
+      };
+    });
+
+    document.querySelectorAll('[data-delete-member]').forEach(btn => {
+      btn.onclick = (e) => {
+        const memberId = e.currentTarget.getAttribute('data-delete-member');
+        const members = getMembers();
+        const member = members.find(m => m.id === memberId);
+        if (!member) return;
+
+        if (confirm(`আপনি কি সত্যিই "${member.name}" কে গ্রুপ ডাটাবেজ থেকে মুছে ফেলতে চান? এটি রিভার্স করা যাবে না!`)) {
+          const filtered = members.filter(m => m.id !== memberId);
+          saveMembers(filtered);
+
+          // Audit trail log
+          const trails = getAuditTrails();
+          trails.unshift({
+            id: `audit-${Date.now()}`,
+            admin_email: state.currentAdminEmail,
+            admin_name: ADMIN_NAMES[state.currentAdminEmail],
+            action: 'DELETE_MEMBER',
+            entity_type: 'MEMBER',
+            description: `Deleted registered member: ${member.name} (No. ${member.member_number})`,
+            timestamp: new Date().toISOString()
+          });
+          saveAuditTrails(trails);
+
+          loadStateFromStorage();
+          updateState({});
+        }
+      };
+    });
+
+    // Edit Admin Notes trigger
+    document.querySelectorAll('[data-edit-notes-btn]').forEach(btn => {
+      btn.onclick = (e) => {
+        const memberId = e.currentTarget.getAttribute('data-edit-notes-btn');
+        const currentVal = e.currentTarget.getAttribute('data-notes-val');
+        updateState({ editingNotesMemberId: memberId, editingNotesText: currentVal });
+        // focus input
+        const inp = document.getElementById('edit-notes-input');
+        if (inp) inp.focus();
+      };
+    });
+
+    // Save notes trigger
+    document.querySelectorAll('[data-save-notes]').forEach(btn => {
+      btn.onclick = (e) => {
+        const memberId = e.currentTarget.getAttribute('data-save-notes');
+        const notesInp = document.getElementById('edit-notes-input');
+        if (notesInp) {
+          const notesText = notesInp.value;
+          const members = getMembers();
+          const mIdx = members.findIndex(m => m.id === memberId);
+          if (mIdx !== -1) {
+            members[mIdx].notes = notesText;
+            members[mIdx].updated_at = new Date().toISOString();
+            saveMembers(members);
+
+            // Audit
+            const trails = getAuditTrails();
+            trails.unshift({
+              id: `audit-${Date.now()}`,
+              admin_email: state.currentAdminEmail,
+              admin_name: ADMIN_NAMES[state.currentAdminEmail],
+              action: 'UPDATE_MEMBER_NOTES',
+              entity_type: 'MEMBER',
+              description: `Updated notes for: ${members[mIdx].name}`,
+              timestamp: new Date().toISOString()
+            });
+            saveAuditTrails(trails);
+
+            loadStateFromStorage();
+            updateState({ editingNotesMemberId: null, editingNotesText: '' });
+          }
+        }
+      };
+    });
+  }
+
+  // TAB EVENTS: BULK INPUT / ACTIVITY TRACKER
+  if (state.currentTab === 'bulk_input') {
+    
+    // Activity input text area modification
+    const textarea = document.getElementById('bulk-activity-textarea');
+    if (textarea) {
+      textarea.oninput = (e) => {
+        const text = e.target.value;
+        updateState({ 
+          bulkInputText: text,
+          uncheckedUnregisteredNames: []
+        });
+        
+        const tx = document.getElementById('bulk-activity-textarea');
+        if (tx) {
+          tx.focus();
+          tx.setSelectionRange(tx.value.length, tx.value.length);
+        }
+      };
+    }
+
+    // Change date selector
+    const dateSel = document.getElementById('bulk-input-date');
+    if (dateSel) {
+      dateSel.onchange = (e) => {
+        updateState({ bulkInputDate: e.target.value });
+      };
+    }
+
+    // Submit Action Save button click (saves activity for ALL detected matched members)
+    const saveBtn = document.getElementById('save-activity-btn');
+    if (saveBtn) {
+      saveBtn.onclick = () => {
+        const { matchedMembers } = parseBulkActivityText(state.bulkInputText);
+        if (matchedMembers.length === 0) return;
+        
+        if (confirm(`আপনি কি সত্যিই নির্বাচিত তারিখ (${state.bulkInputDate}) এ ${matchedMembers.length} জন সক্রিয় মেম্বারের ডেইলি এক্টিভিটি সেভ করতে চান?`)) {
+          submitBulkActivity(state.bulkInputDate, matchedMembers.map(m => m.id));
+        }
+      };
+    }
+
+    // Quick add name helper from warning box directly
+    document.querySelectorAll('[data-quick-add-name]').forEach(btn => {
+      btn.onclick = (e) => {
+        const rawName = e.currentTarget.getAttribute('data-quick-add-name');
+        if (handleAddMember(rawName)) {
+          alert(`"${rawName}" সফলভাবে ডাটাবেজে রেজিস্টার হয়েছে এবং এখন একটিভ তালিকায় সনাক্ত করা যাবে!`);
+        }
+      };
+    });
+
+    // Checkbox toggling for unregistered names
+    document.querySelectorAll('.new-member-checkbox').forEach(chk => {
+      chk.onchange = (e) => {
+        const name = e.target.getAttribute('data-new-name-check');
+        let uncheckedNames = [...state.uncheckedUnregisteredNames];
+        if (e.target.checked) {
+          uncheckedNames = uncheckedNames.filter(n => n !== name);
+        } else {
+          if (!uncheckedNames.includes(name)) {
+            uncheckedNames.push(name);
+          }
+        }
+        updateState({ uncheckedUnregisteredNames: uncheckedNames });
+      };
+    });
+
+    // Select all unregistered names
+    const selectAllNewBtn = document.getElementById('select-all-new-btn');
+    if (selectAllNewBtn) {
+      selectAllNewBtn.onclick = () => {
+        updateState({ uncheckedUnregisteredNames: [] });
+      };
+    }
+
+    // Deselect all unregistered names
+    const deselectAllNewBtn = document.getElementById('deselect-all-new-btn');
+    if (deselectAllNewBtn) {
+      deselectAllNewBtn.onclick = () => {
+        const { unregisteredNames } = parseBulkActivityText(state.bulkInputText);
+        updateState({ uncheckedUnregisteredNames: unregisteredNames });
+      };
+    }
+
+    // Register selected unregistered names in bulk
+    const registerSelectedNewBtn = document.getElementById('register-selected-new-btn');
+    if (registerSelectedNewBtn) {
+      registerSelectedNewBtn.onclick = () => {
+        const { unregisteredNames } = parseBulkActivityText(state.bulkInputText);
+        const namesToReg = unregisteredNames.filter(n => !state.uncheckedUnregisteredNames.includes(n));
+        if (namesToReg.length === 0) return;
+        
+        if (confirm(`আপনি কি সত্যিই নির্বাচিত ${namesToReg.length} জন নতুন মেম্বারকে একসাথে ডেটাবেজে রেজিস্টার করতে চান?`)) {
+          const successCount = handleBulkAddMembers(namesToReg);
+          
+          if (successCount > 0) {
+            alert(`${successCount} জন নতুন মেম্বার সফলভাবে ডাটাবেজে রেজিস্টার হয়েছে এবং এখন তাদের একটিভ মেম্বার হিসেবে ট্র্যাকার চেকলিস্টে পাওয়া যাবে!`);
+            updateState({
+              uncheckedUnregisteredNames: state.uncheckedUnregisteredNames.filter(n => !namesToReg.includes(n))
+            });
+          } else {
+            alert('কোনো নতুন মেম্বার রেজিস্টার করা যায়নি। হয়তো তারা ইতিমধ্যে রেজিস্টার্ড!');
+          }
+        }
+      };
+    }
+  }
+
+  // TAB EVENTS: WARNING NOTICES GENERATOR
+  if (state.currentTab === 'notices') {
+    
+    // Choose filter inactive days
+    const filterDaysSel = document.getElementById('notice-filter-days');
+    if (filterDaysSel) {
+      filterDaysSel.onchange = (e) => {
+        updateState({ noticeFilterDays: Number(e.target.value), copiedNotice: false });
+      };
+    }
+
+    // Single Click Copy notice text helper
+    const copyNoticeBtn = document.getElementById('copy-notice-btn');
+    if (copyNoticeBtn) {
+      copyNoticeBtn.onclick = () => {
+        const textToCopy = document.querySelector('.whitespace-pre-wrap').innerText;
+        navigator.clipboard.writeText(textToCopy).then(() => {
+          updateState({ copiedNotice: true });
+          setTimeout(() => {
+            updateState({ copiedNotice: false });
+          }, 3000);
+        }).catch(err => {
+          console.error('Clipboard copy failed:', err);
+          alert('ক্লিপবোর্ডে কপি করা যায়নি। অনুগ্রহ করে ম্যানুয়ালি সিলেক্ট করে কপি করুন।');
+        });
+      };
+    }
+  }
+
+  // TAB EVENTS: LEADERBOARDS
+  if (state.currentTab === 'leaderboards') {
+    
+    // Live Search input
+    const leadSearch = document.getElementById('leaderboard-search');
+    if (leadSearch) {
+      leadSearch.oninput = (e) => {
+        updateState({ leaderboardSearchQuery: e.target.value });
+        const inp = document.getElementById('leaderboard-search');
+        if (inp) {
+          inp.focus();
+          inp.setSelectionRange(inp.value.length, inp.value.length);
+        }
+      };
+    }
+
+    // Active limit filter
+    const activeFilter = document.getElementById('leaderboard-active-filter');
+    if (activeFilter) {
+      activeFilter.onchange = (e) => {
+        updateState({ leaderboardActiveThreshold: Number(e.target.value) });
+      };
+    }
+
+    // Inactive limit filter
+    const inactiveFilter = document.getElementById('leaderboard-inactive-filter');
+    if (inactiveFilter) {
+      inactiveFilter.onchange = (e) => {
+        updateState({ leaderboardInactiveThreshold: Number(e.target.value) });
+      };
+    }
+  }
+
+  // TAB EVENTS: STATS PERFORMANCE CARD REPORTS
+  if (state.currentTab === 'reports') {
+    
+    // Search member query
+    const repSearch = document.getElementById('report-search');
+    if (repSearch) {
+      repSearch.oninput = (e) => {
+        updateState({ reportSearchQuery: e.target.value });
+        const inp = document.getElementById('report-search');
+        if (inp) {
+          inp.focus();
+          inp.setSelectionRange(inp.value.length, inp.value.length);
+        }
+      };
+    }
+
+    // Select individual member
+    document.querySelectorAll('[data-select-report-member]').forEach(btn => {
+      btn.onclick = (e) => {
+        const memberId = e.currentTarget.getAttribute('data-select-report-member');
+        updateState({ reportSelectedMemberId: memberId });
+      };
+    });
+
+    // PNG downloader triggers
+    const pngBtn = document.getElementById('download-report-png');
+    if (pngBtn) {
+      pngBtn.onclick = () => {
+        const reportCard = document.getElementById('printable-report-card');
+        const selectedMember = state.members.find(m => m.id === state.reportSelectedMemberId);
+        if (!reportCard || !selectedMember) return;
+
+        updateState({ isDownloadingReport: true });
+
+        setTimeout(() => {
+          html2canvas(reportCard, {
+            scale: 2, // high crisp definitions
+            backgroundColor: '#020617', // deep dark theme
+            logging: false,
+            useCORS: true,
+            allowTaint: false
+          }).then(canvas => {
+            const imgData = canvas.toDataURL('image/png');
+            
+            // 1. Attempt desktop direct download
+            try {
+              const link = document.createElement('a');
+              link.download = `${selectedMember.name.replace(/\s+/g, '_')}_Performance_Card.png`;
+              link.href = imgData;
+              link.click();
+            } catch (e) {
+              console.warn('Direct file download link click failed:', e);
+            }
+
+            // 2. Open state modal with the image URL for mobile users or cross-origin fallbacks
+            updateState({ 
+              isDownloadingReport: false,
+              generatedPngUrl: imgData,
+              generatedPngMemberName: selectedMember.name
+            });
+          }).catch(err => {
+            console.error('Canvas image generation failed:', err);
+            alert('রিপোর্ট ইমেজ ডাউনলোড ব্যর্থ হয়েছে!');
+            updateState({ isDownloadingReport: false });
+          });
+        }, 400);
+      };
+    }
+  }
+
+  // TAB EVENTS: SUPABASE GUIDE
+  if (state.currentTab === 'supabase') {
+    
+    // Check if locked
+    if (!state.developerUnlocked) {
+      const passInp = document.getElementById('dev-password-gate-input');
+      const submitBtn = document.getElementById('dev-password-submit-btn');
+      const errEl = document.getElementById('dev-password-error');
+      
+      const attemptUnlock = () => {
+        if (passInp) {
+          const pass = passInp.value;
+          if (pass === 'Sm.Shihab211') {
+            sessionStorage.setItem('developer_unlocked', 'true');
+            updateState({ developerUnlocked: true });
+          } else {
+            if (errEl) {
+              errEl.textContent = 'ভুল পাসওয়ার্ড! অনুগ্রহ করে আবার চেষ্টা করুন।';
+              errEl.classList.remove('hidden');
+            }
+            passInp.value = '';
+            passInp.focus();
+          }
+        }
+      };
+
+      if (submitBtn) {
+        submitBtn.onclick = attemptUnlock;
+      }
+      if (passInp) {
+        passInp.onkeydown = (e) => {
+          if (e.key === 'Enter') {
+            attemptUnlock();
+          }
+        };
+        // Auto-focus input
+        setTimeout(() => passInp.focus(), 100);
+      }
+      return; // Stop binding other supabase elements since they are locked/hidden
+    }
+    
+    // Toggle URL visibility handler
+    const toggleUrlBtn = document.getElementById('toggle-url-visibility-btn');
+    if (toggleUrlBtn) {
+      toggleUrlBtn.onclick = () => {
+        updateState({ showUrlInput: !state.showUrlInput });
+      };
+    }
+
+    // Toggle Key visibility handler
+    const toggleKeyBtn = document.getElementById('toggle-key-visibility-btn');
+    if (toggleKeyBtn) {
+      toggleKeyBtn.onclick = () => {
+        updateState({ showKeyInput: !state.showKeyInput });
+      };
+    }
+
+    // Clear credentials handler
+    const clearCfgBtn = document.getElementById('clear-supabase-config-btn');
+    if (clearCfgBtn) {
+      clearCfgBtn.onclick = () => {
+        if (confirm('আপনি কি সত্যিই আপনার ব্রাউজারে সংরক্ষিত Supabase API ক্রেডেনশিয়ালস মুছে ফেলতে চান?')) {
+          localStorage.removeItem(STORAGE_KEYS.SUPABASE_URL);
+          localStorage.removeItem(STORAGE_KEYS.SUPABASE_KEY);
+          
+          state.supabaseUrl = '';
+          state.supabaseKey = '';
+          state.loadedFromEnv = false;
+          initSupabaseConfig();
+          
+          updateState({ 
+            supabaseConnectionStatus: 'idle',
+            supabaseConnectionError: ''
+          });
+          alert('সংরক্ষিত ক্রেডেনশিয়ালস সফলভাবে মুছে ফেলা হয়েছে!');
+        }
+      };
+    }
+    
+    // Save credentials handler
+    const saveCfgBtn = document.getElementById('save-supabase-config-btn');
+    if (saveCfgBtn) {
+      saveCfgBtn.onclick = async () => {
+        const urlInp = document.getElementById('supabase-url-input');
+        const keyInp = document.getElementById('supabase-key-input');
+        if (urlInp && keyInp) {
+          const url = urlInp.value.trim();
+          const key = keyInp.value.trim();
+          
+          if (!url || !key) {
+            alert('অনুগ্রহ করে সঠিক Supabase URL এবং Public Key প্রদান করুন!');
+            return;
+          }
+          
+          localStorage.setItem(STORAGE_KEYS.SUPABASE_URL, url);
+          localStorage.setItem(STORAGE_KEYS.SUPABASE_KEY, key);
+          
+          updateState({ supabaseUrl: url, supabaseKey: key });
+          
+          // Trigger a live connection test
+          const isOk = await testSupabaseConnection();
+          if (isOk) {
+            alert('ক্রেডেনশিয়ালস সফলভাবে সেভ হয়েছে এবং কানেকশন সফল হয়েছে!');
+          } else {
+            alert('ক্রেডেনশিয়ালস সেভ হয়েছে কিন্তু কানেকশন টেস্ট ব্যর্থ হয়েছে! অনুগ্রহ করে URL/Key বা SQL টেবিল স্ট্রাকচার চেক করুন।');
+          }
+        }
+      };
+    }
+
+    // Test connection handler
+    const testConnBtn = document.getElementById('test-connection-btn');
+    if (testConnBtn) {
+      testConnBtn.onclick = async () => {
+        const isOk = await testSupabaseConnection();
+        if (isOk) {
+          alert('কানেকশন টেস্ট সফল! Supabase লাইভ এবং প্রস্তুত।');
+        } else {
+          alert('কানেকশন টেস্ট ব্যর্থ হয়েছে! আপনার SQL কোড রান করা হয়েছে কিনা এবং ক্রেডেনশিয়ালস সঠিক কিনা তা পুনরায় চেক করুন।');
+        }
+      };
+    }
+
+    // Auto-sync toggle handler
+    const autoSyncTgl = document.getElementById('supabase-autosync-toggle');
+    if (autoSyncTgl) {
+      autoSyncTgl.onchange = (e) => {
+        const checked = e.target.checked;
+        localStorage.setItem(STORAGE_KEYS.SUPABASE_SYNC_ENABLED, checked ? 'true' : 'false');
+        updateState({ supabaseSyncEnabled: checked });
+        if (checked) {
+          alert('লাইভ ব্যাকগ্রাউন্ড অটো-সিংক্রোনাইজেশন চালু করা হয়েছে। এখন থেকে সমস্ত নতুন এক্টিভিটি ও মেম্বার পরিবর্তন স্বয়ংক্রিয়ভাবে Supabase-এ আপলোড হবে।');
+        } else {
+          alert('ব্যাকগ্রাউন্ড অটো-সিংক্রোনাইজেশন বন্ধ করা হয়েছে।');
+        }
+      };
+    }
+
+    // Push button handler
+    const pushBtn = document.getElementById('push-supabase-btn');
+    if (pushBtn) {
+      pushBtn.onclick = () => {
+        pushToSupabase();
+      };
+    }
+
+    // Pull button handler
+    const pullBtn = document.getElementById('pull-supabase-btn');
+    if (pullBtn) {
+      pullBtn.onclick = () => {
+        if (confirm('আপনি কি সত্যিই ক্লাউড Supabase থেকে সমস্ত ডেটা নামিয়ে লোকাল ডেটা ওভাররাইট করতে চান? লোকাল ব্রাউজারের কোনো অসংরক্ষিত পরিবর্তন হারিয়ে যেতে পারে!')) {
+          pullFromSupabase();
+        }
+      };
+    }
+
+    // Copy SQL text script
+    const sqlBtn = document.getElementById('copy-sql-btn');
+    if (sqlBtn) {
+      sqlBtn.onclick = () => {
+        const textToCopy = document.querySelectorAll('pre')[0].innerText;
+        navigator.clipboard.writeText(textToCopy).then(() => {
+          updateState({ copiedSQL: true });
+          setTimeout(() => updateState({ copiedSQL: false }), 2000);
+        });
+      };
+    }
+
+    // Copy React connection logic snippet
+    const jsBtn = document.getElementById('copy-js-btn');
+    if (jsBtn) {
+      jsBtn.onclick = () => {
+        const textToCopy = document.querySelectorAll('pre')[1].innerText;
+        navigator.clipboard.writeText(textToCopy).then(() => {
+          updateState({ copiedJS: true });
+          setTimeout(() => updateState({ copiedJS: false }), 2000);
+        });
+      };
+    }
+  }
+
+  // PNG modal closing handlers
+  const closePngModal = document.getElementById('close-png-modal');
+  if (closePngModal) {
+    closePngModal.onclick = () => {
+      updateState({ generatedPngUrl: '', generatedPngMemberName: '' });
+    };
+  }
+  const closePngModalBtn = document.getElementById('close-png-modal-btn');
+  if (closePngModalBtn) {
+    closePngModalBtn.onclick = () => {
+      updateState({ generatedPngUrl: '', generatedPngMemberName: '' });
+    };
+  }
+
+  // PWA installer banner handlers
+  const pwaCloseBtn = document.getElementById('pwa-close-banner-btn');
+  if (pwaCloseBtn) {
+    pwaCloseBtn.onclick = () => {
+      updateState({ showPwaInstallBanner: false });
+    };
+  }
+  const pwaInstallBtn = document.getElementById('pwa-install-action-btn');
+  if (pwaInstallBtn) {
+    pwaInstallBtn.onclick = () => {
+      if (deferredPrompt) {
+        deferredPrompt.prompt();
+        deferredPrompt.userChoice.then((choiceResult) => {
+          if (choiceResult.outcome === 'accepted') {
+            console.log('User accepted the PWA install prompt');
+          } else {
+            console.log('User dismissed the PWA install prompt');
+          }
+          deferredPrompt = null;
+          updateState({ showPwaInstallBanner: false });
+        });
+      }
+    };
+  }
+
+  // Register member modal trigger handlers
+  const openRegisterBtn = document.getElementById('open-register-modal-btn');
+  if (openRegisterBtn) {
+    openRegisterBtn.onclick = () => {
+      updateState({ showRegisterModal: true });
+    };
+  }
+  const closeRegisterModal = document.getElementById('close-register-modal');
+  if (closeRegisterModal) {
+    closeRegisterModal.onclick = () => {
+      updateState({ showRegisterModal: false });
+    };
+  }
+  const closeRegisterModalBtn = document.getElementById('close-register-modal-btn');
+  if (closeRegisterModalBtn) {
+    closeRegisterModalBtn.onclick = () => {
+      updateState({ showRegisterModal: false });
+    };
+  }
+
+  // Toast close handler
+  const closeToastBtn = document.getElementById('close-toast-btn');
+  if (closeToastBtn) {
+    closeToastBtn.onclick = () => {
+      state.toast = null;
+      render();
+    };
+  }
+}
+
+// PWA installation events
+window.addEventListener('beforeinstallprompt', (e) => {
+  // Prevent default browser-managed promo
+  e.preventDefault();
+  // Save for later prompt
+  deferredPrompt = e;
+  // Show beautiful install banner
+  updateState({ showPwaInstallBanner: true });
+});
+
+window.addEventListener('appinstalled', () => {
+  console.log('App was successfully installed!');
+  deferredPrompt = null;
+  updateState({ showPwaInstallBanner: false });
+});
+
+// Kickstart Application
+window.addEventListener('DOMContentLoaded', () => {
+  loadStateFromStorage();
+  updateState({});
+
+  // Register PWA Service Worker
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js')
+      .then(reg => console.log('Service Worker registered with scope:', reg.scope))
+      .catch(err => console.warn('Service Worker registration failed:', err));
+  }
+
+  // Instantly perform a silent background sync on load to ensure up-to-date data on other devices
+  setTimeout(() => {
+    silentPullFromSupabase();
+  }, 1000);
+
+  // Periodic automatic sync every 2 minutes (120,000 ms)
+  setInterval(() => {
+    silentPullFromSupabase();
+  }, 2 * 60 * 1000);
+});

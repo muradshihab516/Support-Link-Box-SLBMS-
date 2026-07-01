@@ -1,0 +1,6 @@
+{
+  "name": "Support Link Box Admin Tracker",
+  "description": "An advanced administrative workspace for tracking members, daily activity logs, generating dynamic inactive warnings, and downloading member statistics reports as PNG.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
