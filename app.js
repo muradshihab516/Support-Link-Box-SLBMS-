@@ -827,24 +827,24 @@ function render() {
         <div class="flex items-center gap-3">
           <div class="w-3 h-3 rounded-full bg-indigo-500 shadow-[0_0_8px_#6366f1] animate-pulse"></div>
           <div>
-            <h1 class="text-base sm:text-lg font-bold tracking-tight text-white flex items-center gap-1.5">
+            <h1 class="text-base sm:text-lg font-bold tracking-tight text-white flex items-center gap-1.5 font-sans">
               Support Link Box 
               <span class="text-[10px] bg-indigo-500/15 text-indigo-400 font-bold px-2 py-0.5 rounded-full border border-indigo-500/20 uppercase tracking-widest">
                 v2.0 Admin
               </span>
             </h1>
-            <p class="text-[10px] sm:text-xs text-slate-500 font-medium tracking-wide">মেম্বার অ্যাক্টিভিটি এবং ডেইলি লিংক ট্র্যাকিং প্ল্যাটফর্ম</p>
+            <p class="text-[10px] sm:text-xs text-slate-400 font-medium tracking-wide">Member Activity & Daily Link Tracking Dashboard</p>
           </div>
         </div>
 
         <!-- Admin Profile Switcher dropdown -->
         <div class="flex items-center gap-2">
-          <span class="text-[10px] text-slate-500 uppercase font-bold tracking-wider hidden md:inline">Active Admin Panel</span>
+          <span class="text-[10px] text-slate-500 uppercase font-black tracking-wider hidden md:inline">Active Admin Panel</span>
           <select id="admin-selector" class="bg-slate-950 border border-slate-800 text-slate-300 px-3 py-1.5 rounded-xl text-xs font-semibold focus:outline-none focus:border-indigo-500 cursor-pointer">
             ${Object.entries(ADMIN_NAMES).map(([email, name]) => `
               <option value="${email}" ${state.currentAdminEmail === email ? 'selected' : ''}>${name}</option>
             `).join('')}
-            <option value="custom">+ নতুন এডমিন যোগ করুন</option>
+            <option value="custom">+ Add New Admin</option>
           </select>
         </div>
       </div>
@@ -863,85 +863,85 @@ function render() {
           </div>
           <div class="space-y-1">
             <h4 class="text-sm font-bold text-slate-100 flex items-center gap-1.5">
-              মোবাইলে অ্যাপ হিসেবে ব্যবহার করুন!
+              Install App on Your Home Screen!
               <span class="text-[9px] bg-indigo-500 text-white font-black px-1.5 py-0.5 rounded uppercase tracking-wider">PWA APP</span>
             </h4>
             <p class="text-[11px] text-slate-400 leading-relaxed">
-              প্লে-স্টোরের ঝামেলা ছাড়াই এই অ্যাডমিন ড্যাশবোর্ডটি আপনার হোম স্ক্রিনে ইনস্টল করে নিন। সরাসরি অ্যাপের মতো ব্যবহার করতে পারবেন!
+              Add this administrative tracker dashboard to your mobile device's home screen for rapid, app-like management.
             </p>
           </div>
         </div>
         <div class="flex gap-2 w-full md:w-auto shrink-0">
           <button id="pwa-close-banner-btn" class="w-1/2 md:w-auto bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 font-bold text-xs px-4 py-2.5 rounded-xl transition cursor-pointer">
-            পরে করুন
+            Later
           </button>
           <button id="pwa-install-action-btn" class="w-1/2 md:w-auto bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs px-5 py-2.5 rounded-xl transition flex items-center justify-center gap-1.5 shadow-[0_4px_12px_rgba(79,70,229,0.3)] cursor-pointer">
             <i data-lucide="download" class="w-4 h-4"></i>
-            ইনস্টল করুন
+            Install Now
           </button>
         </div>
       </div>
       ` : ''}
 
       <div class="flex overflow-x-auto bg-slate-900 border border-slate-800 p-1.5 rounded-2xl gap-1 no-scrollbar">
-        <button data-tab="members" class="tab-btn flex items-center gap-3 px-4 py-2.5 rounded-xl font-semibold text-xs transition duration-150 whitespace-nowrap cursor-pointer ${
+        <button data-tab="members" class="tab-btn flex items-center gap-3 px-4 py-2.5 rounded-xl font-bold text-xs transition duration-150 whitespace-nowrap cursor-pointer ${
           state.currentTab === 'members'
             ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/20 shadow-sm'
             : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
         }">
           <span class="w-1.5 h-1.5 rounded-full ${state.currentTab === 'members' ? 'bg-indigo-400' : 'bg-slate-600'}"></span>
           <i data-lucide="users" class="w-3.5 h-3.5"></i>
-          মেম্বার ডিরেক্টরি
+          Member Directory
         </button>
 
-        <button data-tab="bulk_input" class="tab-btn flex items-center gap-3 px-4 py-2.5 rounded-xl font-semibold text-xs transition duration-150 whitespace-nowrap cursor-pointer ${
+        <button data-tab="bulk_input" class="tab-btn flex items-center gap-3 px-4 py-2.5 rounded-xl font-bold text-xs transition duration-150 whitespace-nowrap cursor-pointer ${
           state.currentTab === 'bulk_input'
             ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/20 shadow-sm'
             : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
         }">
           <span class="w-1.5 h-1.5 rounded-full ${state.currentTab === 'bulk_input' ? 'bg-indigo-400' : 'bg-slate-600'}"></span>
           <i data-lucide="clipboard-list" class="w-3.5 h-3.5"></i>
-          অ্যাক্টিভিটি ট্র্যাকার (লিংক ইনপুট)
+          Activity Tracker (Link Input)
         </button>
 
-        <button data-tab="notices" class="tab-btn flex items-center gap-3 px-4 py-2.5 rounded-xl font-semibold text-xs transition duration-150 whitespace-nowrap cursor-pointer ${
+        <button data-tab="notices" class="tab-btn flex items-center gap-3 px-4 py-2.5 rounded-xl font-bold text-xs transition duration-150 whitespace-nowrap cursor-pointer ${
           state.currentTab === 'notices'
             ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/20 shadow-sm'
             : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
         }">
           <span class="w-1.5 h-1.5 rounded-full ${state.currentTab === 'notices' ? 'bg-indigo-400' : 'bg-slate-600'}"></span>
           <i data-lucide="megaphone" class="w-3.5 h-3.5"></i>
-          নোটিশ জেনারেটর
+          Notice Generator
         </button>
 
-        <button data-tab="leaderboards" class="tab-btn flex items-center gap-3 px-4 py-2.5 rounded-xl font-semibold text-xs transition duration-150 whitespace-nowrap cursor-pointer ${
+        <button data-tab="leaderboards" class="tab-btn flex items-center gap-3 px-4 py-2.5 rounded-xl font-bold text-xs transition duration-150 whitespace-nowrap cursor-pointer ${
           state.currentTab === 'leaderboards'
             ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/20 shadow-sm'
             : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
         }">
           <span class="w-1.5 h-1.5 rounded-full ${state.currentTab === 'leaderboards' ? 'bg-indigo-400' : 'bg-slate-600'}"></span>
           <i data-lucide="trophy" class="w-3.5 h-3.5"></i>
-          লিডারবোর্ড ও স্ট্যাটস
+          Leaderboards & Stats
         </button>
 
-        <button data-tab="reports" class="tab-btn flex items-center gap-3 px-4 py-2.5 rounded-xl font-semibold text-xs transition duration-150 whitespace-nowrap cursor-pointer ${
+        <button data-tab="reports" class="tab-btn flex items-center gap-3 px-4 py-2.5 rounded-xl font-bold text-xs transition duration-150 whitespace-nowrap cursor-pointer ${
           state.currentTab === 'reports'
             ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/20 shadow-sm'
             : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
         }">
           <span class="w-1.5 h-1.5 rounded-full ${state.currentTab === 'reports' ? 'bg-indigo-400' : 'bg-slate-600'}"></span>
           <i data-lucide="trending-up" class="w-3.5 h-3.5"></i>
-          মেম্বার রিপোর্ট জেনারেটর
+          Performance Report Card
         </button>
 
-        <button data-tab="supabase" class="tab-btn flex items-center gap-3 px-4 py-2.5 rounded-xl font-semibold text-xs transition duration-150 whitespace-nowrap cursor-pointer ml-auto ${
+        <button data-tab="supabase" class="tab-btn flex items-center gap-3 px-4 py-2.5 rounded-xl font-bold text-xs transition duration-150 whitespace-nowrap cursor-pointer ml-auto ${
           state.currentTab === 'supabase'
             ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shadow-sm'
             : 'text-slate-400 hover:text-emerald-400 hover:bg-slate-800/40'
         }">
           <span class="w-1.5 h-1.5 rounded-full ${state.currentTab === 'supabase' ? 'bg-emerald-400' : 'bg-slate-600'}"></span>
           <i data-lucide="database" class="w-3.5 h-3.5"></i>
-          Developer section
+          Developer Database Setting
         </button>
       </div>
 
@@ -952,9 +952,9 @@ function render() {
 
       <!-- Persistent Admin Audit Trail Log -->
       <section class="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-xl space-y-3">
-        <h3 class="font-bold text-xs text-slate-400 uppercase tracking-wider flex items-center gap-1.5 border-b border-slate-800 pb-2">
+        <h3 class="font-bold text-xs text-slate-300 uppercase tracking-wider flex items-center gap-1.5 border-b border-slate-850 pb-2">
           <i data-lucide="history" class="w-4 h-4 text-indigo-400"></i>
-          Database Audit History (অডিট লগ রেকর্ড)
+          Database Audit History
         </h3>
         <div class="max-h-36 overflow-y-auto space-y-1 pr-1 font-mono text-[10px] text-slate-500">
           ${state.auditTrails.length > 0 
@@ -968,7 +968,7 @@ function render() {
                 <span class="text-slate-600 font-medium text-[9px] mt-1 sm:mt-0">${new Date(audit.timestamp).toLocaleTimeString()}</span>
               </div>
             `).join('')
-            : '<p class="italic py-2 text-center text-slate-600">কোনো অডিট লগ ইতিহাস নেই।</p>'
+            : '<p class="italic py-2 text-center text-slate-600">No database audit logs found.</p>'
           }
         </div>
       </section>
@@ -1000,29 +1000,29 @@ function render() {
         <div class="space-y-1">
           <h3 class="text-base font-bold text-slate-100 flex items-center gap-1.5">
             <i data-lucide="user-plus" class="text-indigo-400 w-5 h-5"></i>
-            নতুন মেম্বার রেজিস্ট্রেশন বক্স
+            Register New Group Members
           </h3>
           <p class="text-[11px] text-slate-400">
-            এখানে মেম্বারদের নাম দিয়ে রেজিস্টার করুন। আপনি একসাথে একাধিক মেম্বারও এড করতে পারেন।
+            Add Facebook group members to track link submissions. Supports batch entries.
           </p>
         </div>
 
         <form id="add-member-form" class="space-y-4">
           <div class="space-y-2">
-            <label class="block text-xs font-semibold text-slate-400">মেম্বারের নাম (Single or Multiple @mention)</label>
-            <textarea id="reg-name-input" rows="4" placeholder="যেমন: @Md Emon অথবা একাধিক হলে: @Md Emon @Rakib Islam @Kobir Khan" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-200 placeholder-slate-700 focus:outline-none focus:border-indigo-500 transition-all font-mono" required></textarea>
+            <label class="block text-xs font-semibold text-slate-400">Member Names (Single or Multiple @mentions)</label>
+            <textarea id="reg-name-input" rows="4" placeholder="e.g.: @Md Emon or multiple: @Md Emon @Rakib Islam @Kobir Khan" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-200 placeholder-slate-700 focus:outline-none focus:border-indigo-500 transition-all font-mono" required></textarea>
             <div class="text-[10px] text-indigo-400 font-semibold bg-indigo-950/30 p-2.5 rounded-lg border border-indigo-500/20 leading-relaxed">
-              <span class="text-indigo-300 font-bold">ফরমেট যেমন:</span> <code class="bg-slate-950 px-1 py-0.5 rounded text-indigo-300 font-mono">@Rakib Islam @kobir Khan @Babor ajam</code>
+              <span class="text-indigo-300 font-bold">Input Format:</span> <code class="bg-slate-950 px-1 py-0.5 rounded text-indigo-300 font-mono">@MemberNameOne @MemberNameTwo</code>
             </div>
           </div>
 
           <div class="flex gap-2 justify-end pt-2">
             <button type="button" id="close-register-modal-btn" class="bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs px-4 py-2.5 rounded-xl transition cursor-pointer">
-              বন্ধ করুন
+              Close
             </button>
             <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs px-5 py-2.5 rounded-xl transition flex items-center gap-1.5 shadow-[0_4px_12px_rgba(79,70,229,0.3)] cursor-pointer">
               <i data-lucide="user-plus" class="w-3.5 h-3.5"></i>
-              মেম্বার এড করুন
+              Register Members
             </button>
           </div>
         </form>
@@ -1153,21 +1153,21 @@ function renderTabContent(totalCount, activeCount, inactiveCount, diamondCount) 
                   </div>
                   <h2 class="text-xl sm:text-2xl font-black tracking-tight text-white flex items-center gap-2">
                     <i data-lucide="sparkles" class="w-5 h-5 text-indigo-400"></i>
-                    সাপোর্ট লিংক বক্স অ্যাডমিন ওভারভিউ
+                    Support Link Box Admin Overview
                   </h2>
                   <p class="text-xs text-slate-400 max-w-3xl leading-relaxed">
-                    গ্রুপের সক্রিয় এবং নিষ্ক্রিয় মেম্বারদের দৈনিক লিংক সাবমিশন রিপোর্ট, অডিট ট্রেইল, স্ট্যাটিসটিক্স রিপোর্ট জেনারেটর এবং স্বয়ংক্রিয় ওয়ার্নিং নোটিশ জেনারেটরের সেন্ট্রাল কন্ট্রোল ড্যাশবোর্ড।
+                    Central control panel for daily link submissions, member activity audit trails, warning notice generators, and performance diagnostics.
                   </p>
                 </div>
                 
                 <div class="flex flex-wrap items-center gap-2.5 shrink-0">
                   <button id="open-register-modal-btn" class="text-xs px-5 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-black rounded-xl flex items-center gap-2 transition duration-200 shadow-[0_4px_14px_rgba(79,70,229,0.35)] cursor-pointer hover:scale-[1.02]">
                     <i data-lucide="user-plus" class="w-4 h-4"></i>
-                    নতুন মেম্বার এড করুন
+                    Add New Member
                   </button>
                   <button id="clear-demo-btn" class="text-[10px] px-3.5 py-3 bg-rose-500/5 hover:bg-rose-500/15 text-rose-400 border border-rose-500/20 rounded-xl font-black uppercase tracking-wider flex items-center gap-1.5 transition duration-200 cursor-pointer">
                     <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
-                    রিসেট ও ডেমো মুছুন
+                    Reset & Clear Demo
                   </button>
                 </div>
               </div>
@@ -1179,14 +1179,14 @@ function renderTabContent(totalCount, activeCount, inactiveCount, diamondCount) 
               <div class="bg-gradient-to-br from-slate-950 to-slate-900 p-5 rounded-2xl border border-indigo-500/10 text-left relative overflow-hidden group hover:border-indigo-500/30 transition duration-300">
                 <div class="absolute -right-6 -bottom-6 w-20 h-20 bg-indigo-500/5 rounded-full blur-xl group-hover:bg-indigo-500/10 transition duration-300 pointer-events-none"></div>
                 <div class="flex items-center justify-between">
-                  <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">মোট রেজিস্টার্ড মেম্বার</span>
+                  <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Total Members</span>
                   <div class="w-8 h-8 rounded-lg bg-indigo-500/10 flex items-center justify-center text-indigo-400">
                     <i data-lucide="users" class="w-4 h-4"></i>
                   </div>
                 </div>
                 <div class="mt-4 flex items-baseline gap-2">
                   <p class="text-3xl font-extrabold text-white tracking-tight font-mono">${totalCount}</p>
-                  <span class="text-[10px] text-slate-500 font-medium font-bold">জন মেম্বার</span>
+                  <span class="text-[10px] text-slate-500 font-medium font-bold">Members</span>
                 </div>
               </div>
 
@@ -1194,14 +1194,14 @@ function renderTabContent(totalCount, activeCount, inactiveCount, diamondCount) 
               <div class="bg-gradient-to-br from-slate-950 to-slate-900 p-5 rounded-2xl border border-emerald-500/10 text-left relative overflow-hidden group hover:border-emerald-500/30 transition duration-300">
                 <div class="absolute -right-6 -bottom-6 w-20 h-20 bg-emerald-500/5 rounded-full blur-xl group-hover:bg-emerald-500/10 transition duration-300 pointer-events-none"></div>
                 <div class="flex items-center justify-between">
-                  <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">একটিভ মেম্বার</span>
+                  <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Active Members</span>
                   <div class="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center text-emerald-400">
                     <i data-lucide="shield-check" class="w-4 h-4"></i>
                   </div>
                 </div>
                 <div class="mt-4 flex items-baseline gap-2">
                   <p class="text-3xl font-extrabold text-emerald-400 tracking-tight font-mono">${activeCount}</p>
-                  <span class="text-[10px] text-slate-500 font-medium font-bold">জন সক্রিয়</span>
+                  <span class="text-[10px] text-slate-500 font-medium font-bold">Active</span>
                 </div>
               </div>
 
@@ -1209,14 +1209,14 @@ function renderTabContent(totalCount, activeCount, inactiveCount, diamondCount) 
               <div class="bg-gradient-to-br from-slate-950 to-slate-900 p-5 rounded-2xl border border-rose-500/10 text-left relative overflow-hidden group hover:border-rose-500/30 transition duration-300">
                 <div class="absolute -right-6 -bottom-6 w-20 h-20 bg-rose-500/5 rounded-full blur-xl group-hover:bg-rose-500/10 transition duration-300 pointer-events-none"></div>
                 <div class="flex items-center justify-between">
-                  <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">নিষ্ক্রিয় (⚠️ ওয়ার্নিং)</span>
+                  <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Inactive (⚠️ Warning)</span>
                   <div class="w-8 h-8 rounded-lg bg-rose-500/10 flex items-center justify-center text-rose-400">
                     <i data-lucide="alert-triangle" class="w-4 h-4"></i>
                   </div>
                 </div>
                 <div class="mt-4 flex items-baseline gap-2">
                   <p class="text-3xl font-extrabold text-rose-400 tracking-tight font-mono">${inactiveCount}</p>
-                  <span class="text-[10px] text-slate-500 font-medium font-bold">জন ইনেক্টিভ</span>
+                  <span class="text-[10px] text-slate-500 font-medium font-bold">Inactive</span>
                 </div>
               </div>
 
@@ -1224,7 +1224,7 @@ function renderTabContent(totalCount, activeCount, inactiveCount, diamondCount) 
               <div class="bg-gradient-to-br from-slate-950 to-slate-900 p-5 rounded-2xl border border-cyan-500/10 text-left relative overflow-hidden group hover:border-cyan-500/30 transition duration-300">
                 <div class="absolute -right-6 -bottom-6 w-20 h-20 bg-cyan-500/5 rounded-full blur-xl group-hover:bg-cyan-500/10 transition duration-300 pointer-events-none"></div>
                 <div class="flex items-center justify-between">
-                  <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">ডায়মন্ড মেম্বার (৫০০+ pt)</span>
+                  <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Diamond Tiers</span>
                   <div class="w-8 h-8 rounded-lg bg-cyan-500/10 flex items-center justify-center text-cyan-400">
                     <i data-lucide="gem" class="w-4 h-4"></i>
                   </div>
@@ -1243,7 +1243,7 @@ function renderTabContent(totalCount, activeCount, inactiveCount, diamondCount) 
           <div class="p-5 border-b border-slate-800 bg-slate-950/40 flex flex-col sm:flex-row gap-4 items-center justify-between">
             <div class="relative w-full sm:w-72">
               <i data-lucide="search" class="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2"></i>
-              <input id="member-search-input" type="text" value="${state.searchQueryMembers}" placeholder="মেম্বারের নাম বা নম্বর লিখে খুঁজুন..." class="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2 text-xs text-slate-300 focus:outline-none focus:border-indigo-500 placeholder-slate-700" />
+              <input id="member-search-input" type="text" value="${state.searchQueryMembers}" placeholder="Search member name or number..." class="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2 text-xs text-slate-300 focus:outline-none focus:border-indigo-500 placeholder-slate-700" />
             </div>
 
             <!-- Filters list options -->
@@ -1251,8 +1251,8 @@ function renderTabContent(totalCount, activeCount, inactiveCount, diamondCount) 
               ${[
                 { id: 'all', label: 'All' },
                 { id: 'active', label: 'Active' },
-                { id: 'warning', label: 'Warning (৭+ দিন)' },
-                { id: 'inactive', label: 'Inactive (১২+ দিন)' },
+                { id: 'warning', label: 'Warning (7+ Days)' },
+                { id: 'inactive', label: 'Inactive (12+ Days)' },
                 { id: 'diamond', label: '💎 Diamond' },
                 { id: 'gold', label: '⭐ Gold' },
                 { id: 'silver', label: '🥈 Silver' },
@@ -1298,7 +1298,7 @@ function renderTabContent(totalCount, activeCount, inactiveCount, diamondCount) 
                       }">● ${m.status}</span>
                     </td>
                     <td class="py-3 px-5 text-center font-mono text-xs ${m.consecutive_inactive_days > 0 ? 'text-rose-400 font-bold' : 'text-slate-500'}">
-                      ${m.consecutive_inactive_days > 0 ? `${m.consecutive_inactive_days} দিন` : 'Active'}
+                      ${m.consecutive_inactive_days > 0 ? `${m.consecutive_inactive_days} Days` : 'Active'}
                     </td>
                     <td class="py-3 px-5 text-center">
                       <div class="inline-block text-left">
@@ -1331,7 +1331,7 @@ function renderTabContent(totalCount, activeCount, inactiveCount, diamondCount) 
                   </tr>
                 `).join('') : `
                   <tr>
-                    <td colspan="7" class="py-8 text-center text-xs text-slate-500 italic">কোনো মেম্বার খুঁজে পাওয়া যায়নি!</td>
+                    <td colspan="7" class="py-8 text-center text-xs text-slate-500 italic">No members found matching your search.</td>
                   </tr>
                 `}
               </tbody>
@@ -1353,20 +1353,20 @@ function renderTabContent(totalCount, activeCount, inactiveCount, diamondCount) 
             <div class="flex items-center justify-between border-b border-slate-800 pb-3">
               <div class="flex items-center gap-2.5">
                 <i data-lucide="clipboard-list" class="w-5 h-5 text-indigo-400"></i>
-                <h3 class="font-bold text-slate-100 text-base">ডেইলি লিংক প্রদান সাবমিশন ট্র্যাকার</h3>
+                <h3 class="font-bold text-slate-100 text-base">Daily Link Submission Tracker</h3>
               </div>
               <input id="bulk-input-date" type="date" value="${state.bulkInputDate}" class="bg-slate-950 border border-slate-800 text-xs px-3 py-1.5 rounded-xl text-slate-300 font-semibold focus:outline-none focus:border-indigo-500 cursor-pointer" />
             </div>
 
             <p class="text-xs text-slate-400 leading-relaxed">
-              ফেসবুক মেসেঞ্জার গ্রুপ বা লিংক বক্স পোস্ট থেকে মেম্বারদের দৈনিক জমা দেওয়া লিংক তালিকার টেক্সট সরাসরি নিচে পেস্ট করুন। সিস্টেম স্বয়ংক্রিয়ভাবে ডানপাশের চেকলিস্টে টিক মার্ক করে দেবে। অথবা সরাসরি ডানপাশের তালিকা থেকে ম্যানুয়ালি মেম্বার সিলেক্ট করুন।
+              Paste raw text containing member link submissions directly from your Facebook Messenger group or support post. The tracker automatically identifies mentions, increments active streaks, and flags unregistered names.
             </p>
 
-            <textarea id="bulk-activity-textarea" rows="12" placeholder="১. @Rahi Ahmed Rabiul&#10;২. @Orithra Mazumder&#10;৩. @Ahmed Sopon" class="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 text-xs text-slate-300 placeholder-slate-700 focus:outline-none focus:border-indigo-500 font-mono leading-relaxed resize-y">${state.bulkInputText}</textarea>
+            <textarea id="bulk-activity-textarea" rows="12" placeholder="1. @Rahi Ahmed Rabiul&#10;2. @Orithra Mazumder&#10;3. @Ahmed Sopon" class="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 text-xs text-slate-300 placeholder-slate-700 focus:outline-none focus:border-indigo-500 font-mono leading-relaxed resize-y">${state.bulkInputText}</textarea>
 
             <button id="save-activity-btn" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xs py-3.5 rounded-xl shadow-[0_4px_12px_rgba(79,70,229,0.3)] transition-all flex items-center justify-center gap-2 cursor-pointer" ${matchedMembers.length === 0 ? 'disabled' : ''}>
               <i data-lucide="save" class="w-4 h-4"></i>
-              ডেইলি অ্যাক্টিভিটি ডেটাবেজে সেভ করুন (${matchedMembers.length} জন সক্রিয়)
+              Save Daily Activity (${matchedMembers.length} Active Members)
             </button>
           </div>
 
@@ -1379,7 +1379,7 @@ function renderTabContent(totalCount, activeCount, inactiveCount, diamondCount) 
                 <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/60 pb-3 mb-3">
                   <h4 class="font-bold text-slate-200 text-xs uppercase tracking-wider flex items-center gap-1.5">
                     <i data-lucide="check-circle" class="w-4 h-4 text-emerald-400"></i>
-                    সনাক্তকৃত সক্রিয় মেম্বার (${matchedMembers.length} জন)
+                    Identified Active Members (${matchedMembers.length})
                   </h4>
                 </div>
 
@@ -1398,7 +1398,7 @@ function renderTabContent(totalCount, activeCount, inactiveCount, diamondCount) 
                       </div>
                     </div>
                   `).join('') : `
-                    <p class="text-[11px] text-slate-600 italic py-8 text-center">ইনপুট বক্সে মেম্বারদের নামের টেক্সট পেস্ট করুন।</p>
+                    <p class="text-[11px] text-slate-600 italic py-8 text-center">Paste raw link submissions in the input box to identify active members.</p>
                   `}
                 </div>
               </div>
@@ -1406,7 +1406,7 @@ function renderTabContent(totalCount, activeCount, inactiveCount, diamondCount) 
               <div class="bg-indigo-500/5 border border-indigo-500/10 rounded-xl p-3 flex gap-2 items-start mt-4">
                 <i data-lucide="award" class="w-4 h-4 text-indigo-400 flex-shrink-0 mt-0.5"></i>
                 <p class="text-[10px] text-slate-400 leading-relaxed">
-                  <strong class="text-indigo-400">পয়েন্টস বোনাস:</strong> ডেটাবেজে সেভ করার সাথে সাথে সনাক্তকৃত মেম্বারদের মোট পয়েন্টে <span class="font-bold font-mono text-indigo-400">+১০ পয়েন্ট</span> যোগ হবে এবং তাদের ডেইলি স্ট্রেইক সংখ্যা ১ দিন বৃদ্ধি পাবে।
+                  <strong class="text-indigo-400">Streak & Point Increment:</strong> Saving updates the database: identified members receive <span class="font-bold font-mono text-indigo-400">+10 Pts</span> and their consecutive active streaks increase by 1.
                 </p>
               </div>
             </div>
@@ -1416,20 +1416,20 @@ function renderTabContent(totalCount, activeCount, inactiveCount, diamondCount) 
               <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/60 pb-3 mb-3">
                 <h4 class="font-bold text-slate-200 text-xs uppercase tracking-wider flex items-center gap-1.5">
                   <i data-lucide="alert-triangle" class="w-4 h-4 text-amber-500 animate-pulse"></i>
-                  অননুমোদিত / নতুন নাম (${unregisteredNames.length} জন)
+                  Unregistered / New Names (${unregisteredNames.length})
                 </h4>
                 ${unregisteredNames.length > 0 ? `
                   <div class="flex items-center gap-2">
                     <button id="select-all-new-btn" class="text-[9px] bg-amber-500/10 hover:bg-amber-600 text-amber-400 hover:text-slate-950 px-2 py-1 rounded-md border border-amber-500/20 font-bold transition-all cursor-pointer">
-                      সব সিলেক্ট
+                      Select All
                     </button>
                     <button id="deselect-all-new-btn" class="text-[9px] bg-rose-500/10 hover:bg-rose-500 text-rose-400 hover:text-white px-2 py-1 rounded-md border border-rose-500/20 font-bold transition-all cursor-pointer">
-                      সব বাদ
+                      Clear All
                     </button>
                   </div>
                 ` : ''}
               </div>
-              <p class="text-[10px] text-slate-400 mb-3">নিচের নামগুলো ডাটাবেজে পাওয়া যায়নি। আপনি চাইলে এগুলো সিলেক্ট করে একসাথে বা আলাদাভাবে রেজিস্টার করতে পারেন।</p>
+              <p class="text-[10px] text-slate-400 mb-3">These names were mentioned but are not currently registered. You can select and register them individually or in bulk.</p>
               
               <div class="max-h-40 overflow-y-auto space-y-1.5 pr-1 divide-y divide-slate-850/40 font-mono text-[10px]">
                 ${unregisteredNames.length > 0 ? unregisteredNames.map(name => {
@@ -1446,7 +1446,7 @@ function renderTabContent(totalCount, activeCount, inactiveCount, diamondCount) 
                     </div>
                   `;
                 }).join('') : `
-                  <p class="text-[11px] text-slate-600 italic py-4 text-center">কোনো অননুমোদিত নাম পাওয়া যায়নি।</p>
+                  <p class="text-[11px] text-slate-600 italic py-4 text-center">No unregistered names detected.</p>
                 `}
               </div>
 
@@ -1454,7 +1454,7 @@ function renderTabContent(totalCount, activeCount, inactiveCount, diamondCount) 
                 <div class="mt-4 pt-3 border-t border-slate-800/60">
                   <button id="register-selected-new-btn" class="w-full bg-amber-600 hover:bg-amber-500 text-slate-950 font-extrabold text-[11px] py-2.5 rounded-xl shadow-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer" ${unregisteredNames.filter(n => !state.uncheckedUnregisteredNames.includes(n)).length === 0 ? 'disabled' : ''}>
                     <i data-lucide="user-plus" class="w-4 h-4"></i>
-                    নির্বাচিত (${unregisteredNames.filter(n => !state.uncheckedUnregisteredNames.includes(n)).length} জন) নতুন মেম্বার একসাথে রেজিস্টার করুন
+                    Bulk Register Selected (${unregisteredNames.filter(n => !state.uncheckedUnregisteredNames.includes(n)).length}) New Members
                   </button>
                 </div>
               ` : ''}
@@ -1500,25 +1500,25 @@ ${listText}
           <div class="lg:col-span-4 bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-5">
             <div class="flex items-center gap-2 border-b border-slate-800 pb-3">
               <i data-lucide="megaphone" class="w-5 h-5 text-indigo-400"></i>
-              <h3 class="font-bold text-slate-100 text-lg">নোটিশ মেকার ও জেনারেটর</h3>
+              <h3 class="font-bold text-slate-100 text-lg">Notice Maker & Generator</h3>
             </div>
 
             <p class="text-xs text-slate-400 leading-relaxed">
-              যেসব গ্রুপ মেম্বাররা লিংক প্রদান না করে নিষ্ক্রিয় রয়েছে, তাদের জন্য ফিল্টার সিলেক্ট করে ওয়ার্নিং নোটিশ তৈরি করুন।
+              Select an inactivity threshold to generate warning notifications for inactive Facebook group members.
             </p>
 
             <div class="space-y-4 bg-slate-950 p-4 rounded-xl border border-slate-800">
               <div>
                 <label class="block text-xs font-semibold text-slate-400 mb-1.5 flex justify-between">
-                  <span>নিষ্ক্রিয়তার সময়সীমা (Inactivity Filter)</span>
-                  <span class="text-indigo-400 font-bold">${state.noticeFilterDays} দিন বা তার বেশি</span>
+                  <span>Inactivity Threshold Filter</span>
+                  <span class="text-indigo-400 font-bold">${state.noticeFilterDays} Days or more</span>
                 </label>
                 <select id="notice-filter-days" class="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-slate-200 cursor-pointer focus:outline-none focus:border-indigo-500">
-                  <option value="3" ${state.noticeFilterDays === 3 ? 'selected' : ''}>৩ দিন বা তার বেশি (3+ Days Inactive)</option>
-                  <option value="5" ${state.noticeFilterDays === 5 ? 'selected' : ''}>৫ দিন বা তার বেশি (5+ Days Inactive)</option>
-                  <option value="7" ${state.noticeFilterDays === 7 ? 'selected' : ''}>৭ দিন বা তার বেশি (7+ Days Inactive)</option>
-                  <option value="10" ${state.noticeFilterDays === 10 ? 'selected' : ''}>১০ দিন বা তার বেশি (10+ Days Inactive)</option>
-                  <option value="12" ${state.noticeFilterDays === 12 ? 'selected' : ''}>১২ দিন বা তার বেশি (12+ Days Inactive)</option>
+                  <option value="3" ${state.noticeFilterDays === 3 ? 'selected' : ''}>3+ Days Inactive</option>
+                  <option value="5" ${state.noticeFilterDays === 5 ? 'selected' : ''}>5+ Days Inactive</option>
+                  <option value="7" ${state.noticeFilterDays === 7 ? 'selected' : ''}>7+ Days Inactive</option>
+                  <option value="10" ${state.noticeFilterDays === 10 ? 'selected' : ''}>10+ Days Inactive</option>
+                  <option value="12" ${state.noticeFilterDays === 12 ? 'selected' : ''}>12+ Days Inactive</option>
                 </select>
               </div>
             </div>
@@ -1829,13 +1829,13 @@ ${listText}
             <!-- Left Side: Member Selector list panel -->
             <div class="lg:col-span-4 bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-xl flex flex-col space-y-4">
               <div class="border-b border-slate-800 pb-2">
-                <h3 class="font-bold text-slate-100 text-sm tracking-wide uppercase">মেম্বার সিলেক্ট করুন</h3>
-                <p class="text-[11px] text-slate-400 mt-1">ব্যক্তিগত অ্যাক্টিভিটি রিপোর্ট তৈরি এবং ডাউনলোড করতে মেম্বার সিলেক্ট করুন।</p>
+                <h3 class="font-bold text-slate-100 text-sm tracking-wide uppercase">Select Group Member</h3>
+                <p class="text-[11px] text-slate-400 mt-1">Select a member to generate, view, and download their custom report card.</p>
               </div>
 
               <div class="relative">
                 <i data-lucide="search" class="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2"></i>
-                <input id="report-search" type="text" value="${state.reportSearchQuery}" placeholder="নাম বা মেম্বার আইডি লিখুন..." class="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-300 focus:outline-none focus:border-indigo-500 placeholder-slate-700 font-mono" />
+                <input id="report-search" type="text" value="${state.reportSearchQuery}" placeholder="Search name or ID..." class="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-300 focus:outline-none focus:border-indigo-500 placeholder-slate-700 font-mono" />
               </div>
 
               <div class="space-y-1.5 max-h-[350px] overflow-y-auto pr-1">
@@ -1857,7 +1857,7 @@ ${listText}
                     </button>
                   `;
                 }).join('')}
-                ${filteredForReports.length === 0 ? '<p class="text-xs text-slate-600 text-center py-8">কোনো মেম্বার পাওয়া যায়নি!</p>' : ''}
+                ${filteredForReports.length === 0 ? '<p class="text-xs text-slate-600 text-center py-8">No members matching search query.</p>' : ''}
               </div>
             </div>
 
@@ -1922,11 +1922,11 @@ ${listText}
                           </li>
                           <li class="flex justify-between border-b border-slate-800/50 pb-1.5">
                             <span class="text-slate-500">Total Active Days:</span>
-                            <span class="text-slate-200 font-bold font-mono">${selectedMember.total_active_days} দিন</span>
+                            <span class="text-slate-200 font-bold font-mono">${selectedMember.total_active_days} Days</span>
                           </li>
                           <li class="flex justify-between border-b border-slate-800/50 pb-1.5">
                             <span class="text-slate-500">Inactivity Counter:</span>
-                            <span class="text-rose-400 font-bold font-mono">${selectedMember.consecutive_inactive_days} দিন</span>
+                            <span class="text-rose-400 font-bold font-mono">${selectedMember.consecutive_inactive_days} Days</span>
                           </li>
                           <li class="flex justify-between">
                             <span class="text-slate-500">Last Submission Date:</span>
@@ -1946,7 +1946,7 @@ ${listText}
                             `).join('')}
                           </div>
                         ` : `
-                          <p class="text-[11px] text-slate-500 italic py-2">কোনো ব্যাজ অর্জন করা হয়নি!</p>
+                          <p class="text-[11px] text-slate-500 italic py-2">No badges earned yet.</p>
                         `}
                         <div class="border-t border-slate-800/50 pt-2 text-[10px] text-slate-500 font-mono">
                           Generated: ${new Date().toISOString().split('T')[0]} | Support Link Box
@@ -1978,7 +1978,7 @@ ${listText}
                           </div>
                         </div>
                       `).join('') : `
-                        <p class="text-xs text-slate-500 italic py-4 text-center">এখনো কোনো লিংক সাবমিট ইতিহাস রেকর্ড করা হয়নি!</p>
+                        <p class="text-xs text-slate-500 italic py-4 text-center">No link submission history has been logged yet.</p>
                       `}
                     </div>
                   </div>
@@ -1987,9 +1987,9 @@ ${listText}
               ` : `
                 <div class="flex flex-col items-center justify-center py-24 bg-slate-900 border border-slate-800 rounded-2xl text-center text-slate-500">
                   <i data-lucide="help-circle" class="w-14 h-14 text-slate-700 mb-3"></i>
-                  <p class="font-semibold text-slate-400 text-sm">কোনো মেম্বার সিলেক্ট করা নেই</p>
+                  <p class="font-semibold text-slate-400 text-sm">No Member Selected</p>
                   <p class="text-xs text-slate-500 max-w-xs mt-1">
-                    বাম পাশের প্যানেল থেকে যেকোনো মেম্বারের ওপর ক্লিক করে তার সার্টিফিকেট রিপোর্ট কার্ড এবং PNG ডাউনলোড অপশন চালু করুন।
+                    Select any member from the left panel to load their performance card, stats summary, and PNG card download options.
                   </p>
                 </div>
               `}
