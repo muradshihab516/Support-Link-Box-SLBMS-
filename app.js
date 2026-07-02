@@ -31,27 +31,9 @@ const STORAGE_KEYS = {
 
 // Supabase client and sync helpers
 export function getSupabase() {
-  // 1. Prioritize environment variables (useful for robust multi-device setup via AI Studio Secrets)
-  let url = typeof import.meta !== 'undefined' && import.meta.env && (import.meta.env.VITE_SUPABASE_URL || import.meta.env.VITE_SUPABASE_ANON_URL);
-  let key = typeof import.meta !== 'undefined' && import.meta.env && (import.meta.env.VITE_SUPABASE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.VITE_SUPABASE_API_KEY);
+  const url = 'https://ngakeapuvnwfvfoqvidc.supabase.co';
+  const key = 'sb_publishable_UKs0BaYRcXvHCVwsi1ZeNA_UyNbWLWC';
 
-  // 2. Fallback to localStorage
-  if (!url) {
-    url = localStorage.getItem(STORAGE_KEYS.SUPABASE_URL);
-  }
-  if (!key) {
-    key = localStorage.getItem(STORAGE_KEYS.SUPABASE_KEY);
-  }
-
-  // 3. Fallback to default public template values
-  if (!url) {
-    url = 'https://ngakeapuvnwfvfoqvidc.supabase.co';
-  }
-  if (!key) {
-    key = 'sb_publishable_UKs0BaYRcXvHCVwsi1ZeNA_UyNbWLWC';
-  }
-
-  if (!url || !key) return null;
   if (!window.supabase) {
     console.warn('Supabase JS library CDN is not loaded yet.');
     return null;
