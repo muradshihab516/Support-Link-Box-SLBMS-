@@ -31,8 +31,26 @@ const STORAGE_KEYS = {
 
 // Supabase client and sync helpers
 export function getSupabase() {
-  const url = localStorage.getItem(STORAGE_KEYS.SUPABASE_URL) || (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_URL) || 'https://ngakeapuvnwfvfoqvidc.supabase.co';
-  const key = localStorage.getItem(STORAGE_KEYS.SUPABASE_KEY) || (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_KEY) || 'sb_publishable_UKs0BaYRcXvHCVwsi1ZeNA_UyNbWLWC';
+  // 1. Prioritize environment variables (useful for robust multi-device setup via AI Studio Secrets)
+  let url = typeof import.meta !== 'undefined' && import.meta.env && (import.meta.env.VITE_SUPABASE_URL || import.meta.env.VITE_SUPABASE_ANON_URL);
+  let key = typeof import.meta !== 'undefined' && import.meta.env && (import.meta.env.VITE_SUPABASE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.VITE_SUPABASE_API_KEY);
+
+  // 2. Fallback to localStorage
+  if (!url) {
+    url = localStorage.getItem(STORAGE_KEYS.SUPABASE_URL);
+  }
+  if (!key) {
+    key = localStorage.getItem(STORAGE_KEYS.SUPABASE_KEY);
+  }
+
+  // 3. Fallback to default public template values
+  if (!url) {
+    url = 'https://ngakeapuvnwfvfoqvidc.supabase.co';
+  }
+  if (!key) {
+    key = 'sb_publishable_UKs0BaYRcXvHCVwsi1ZeNA_UyNbWLWC';
+  }
+
   if (!url || !key) return null;
   if (!window.supabase) {
     console.warn('Supabase JS library CDN is not loaded yet.');
@@ -121,57 +139,42 @@ export async function pullFromSupabase() {
   }
   updateState({ supabaseSyncing: true });
   try {
-    // Pull members
-    const { data: remoteMembers, error: mErr } = await client.from('members').select('*').order('member_number', { ascending: true });
+    // 1. Fetch remote members
+    const { data: remoteMembers, error: mErr } = await client
+      .from('members')
+      .select('*')
+      .order('member_number', { ascending: true });
     if (mErr) throw new Error(`Members Pull Error: ${mErr.message}`);
 
-    // Pull logs
-    const { data: remoteLogs, error: lErr } = await client.from('activity_logs').select('*');
+    // 2. Fetch remote logs
+    const { data: remoteLogs, error: lErr } = await client
+      .from('activity_logs')
+      .select('*');
     if (lErr) throw new Error(`Logs Pull Error: ${lErr.message}`);
 
-    // Pull badges
-    const { data: remoteBadges, error: bErr } = await client.from('badges').select('*');
+    // 3. Fetch remote badges
+    const { data: remoteBadges, error: bErr } = await client
+      .from('badges')
+      .select('*');
     if (bErr) throw new Error(`Badges Pull Error: ${bErr.message}`);
 
-    // Pull audit
-    const { data: remoteAudits, error: aErr } = await client.from('audit_trails').select('*').order('timestamp', { ascending: false });
+    // 4. Fetch remote audit trails
+    const { data: remoteAudits, error: aErr } = await client
+      .from('audit_trails')
+      .select('*')
+      .order('timestamp', { ascending: false });
     if (aErr) throw new Error(`Audits Pull Error: ${aErr.message}`);
 
-    // Smart merge with local storage data to prevent wiping out local unsynced registrations
-    const localMembers = JSON.parse(localStorage.getItem(STORAGE_KEYS.MEMBERS) || '[]');
-    const localLogs = JSON.parse(localStorage.getItem(STORAGE_KEYS.LOGS) || '[]');
-    const localBadges = JSON.parse(localStorage.getItem(STORAGE_KEYS.BADGES) || '[]');
-    const localAudits = JSON.parse(localStorage.getItem(STORAGE_KEYS.AUDIT) || '[]');
+    // Direct online-first: overwrite local caches with server state
+    localStorage.setItem(STORAGE_KEYS.MEMBERS, JSON.stringify(remoteMembers || []));
+    localStorage.setItem(STORAGE_KEYS.LOGS, JSON.stringify(remoteLogs || []));
+    localStorage.setItem(STORAGE_KEYS.BADGES, JSON.stringify(remoteBadges || []));
+    localStorage.setItem(STORAGE_KEYS.AUDIT, JSON.stringify(remoteAudits || []));
 
-    // Merge members
-    const remoteMemberIds = new Set((remoteMembers || []).map(m => m.id));
-    const unsyncedMembers = localMembers.filter(m => m && m.id && !remoteMemberIds.has(m.id));
-    const mergedMembers = [...(remoteMembers || []), ...unsyncedMembers];
-
-    // Merge logs
-    const remoteLogIds = new Set((remoteLogs || []).map(l => l.id));
-    const unsyncedLogs = localLogs.filter(l => l && l.id && !remoteLogIds.has(l.id));
-    const mergedLogs = [...(remoteLogs || []), ...unsyncedLogs];
-
-    // Merge badges
-    const remoteBadgeIds = new Set((remoteBadges || []).map(b => b.id));
-    const unsyncedBadges = localBadges.filter(b => b && b.id && !remoteBadgeIds.has(b.id));
-    const mergedBadges = [...(remoteBadges || []), ...unsyncedBadges];
-
-    // Merge audits
-    const remoteAuditIds = new Set((remoteAudits || []).map(a => a.id));
-    const unsyncedAudits = localAudits.filter(a => a && a.id && !remoteAuditIds.has(a.id));
-    const mergedAudits = [...(remoteAudits || []), ...unsyncedAudits];
-
-    // Save back to local storage (which will trigger standard sync-back of newly merged unsynced records)
-    saveMembers(mergedMembers);
-    saveActivityLogs(mergedLogs);
-    saveBadges(mergedBadges);
-    saveAuditTrails(mergedAudits);
-
+    // Reload state from newly overwritten storage
     loadStateFromStorage();
     updateState({ supabaseSyncing: false, supabaseConnectionStatus: 'connected', supabaseConnectionError: '' });
-    showToast('অভিনন্দন! Supabase ক্লাউড থেকে রেকর্ড এবং লোকাল রেকর্ড সফলভাবে মার্জ (Merge) করা হয়েছে!', 'success');
+    showToast('অভিনন্দন! Supabase ক্লাউড ডাটাবেজ থেকে সমস্ত রেকর্ড সফলভাবে ডাউনলোড করা হয়েছে!', 'success');
     return true;
   } catch (err) {
     console.error(err);
@@ -184,82 +187,175 @@ export async function pullFromSupabase() {
 export async function silentPullFromSupabase() {
   const client = getSupabase();
   if (!client) return false;
-  // If sync is explicitly disabled, skip background pull
   if (localStorage.getItem(STORAGE_KEYS.SUPABASE_SYNC_ENABLED) === 'false') return false;
 
+  updateState({ supabaseSyncing: true });
   try {
-    // Pull members
-    const { data: remoteMembers, error: mErr } = await client.from('members').select('*').order('member_number', { ascending: true });
-    if (mErr) throw new Error(`Members Pull Error: ${mErr.message}`);
+    // 1. Fetch remote members
+    const { data: remoteMembers, error: mErr } = await client
+      .from('members')
+      .select('*')
+      .order('member_number', { ascending: true });
+    if (mErr) throw mErr;
 
-    // Pull logs
-    const { data: remoteLogs, error: lErr } = await client.from('activity_logs').select('*');
-    if (lErr) throw new Error(`Logs Pull Error: ${lErr.message}`);
+    // 2. Fetch remote logs
+    const { data: remoteLogs, error: lErr } = await client
+      .from('activity_logs')
+      .select('*');
+    if (lErr) throw lErr;
 
-    // Pull badges
-    const { data: remoteBadges, error: bErr } = await client.from('badges').select('*');
-    if (bErr) throw new Error(`Badges Pull Error: ${bErr.message}`);
+    // 3. Fetch remote badges
+    const { data: remoteBadges, error: bErr } = await client
+      .from('badges')
+      .select('*');
+    if (bErr) throw bErr;
 
-    // Pull audit
-    const { data: remoteAudits, error: aErr } = await client.from('audit_trails').select('*').order('timestamp', { ascending: false });
-    if (aErr) throw new Error(`Audits Pull Error: ${aErr.message}`);
+    // 4. Fetch remote audit trails
+    const { data: remoteAudits, error: aErr } = await client
+      .from('audit_trails')
+      .select('*')
+      .order('timestamp', { ascending: false });
+    if (aErr) throw aErr;
 
-    // Smart merge with local storage data to prevent wiping out local unsynced registrations
-    const localMembers = JSON.parse(localStorage.getItem(STORAGE_KEYS.MEMBERS) || '[]');
-    const localLogs = JSON.parse(localStorage.getItem(STORAGE_KEYS.LOGS) || '[]');
-    const localBadges = JSON.parse(localStorage.getItem(STORAGE_KEYS.BADGES) || '[]');
-    const localAudits = JSON.parse(localStorage.getItem(STORAGE_KEYS.AUDIT) || '[]');
-
-    // Merge members
-    const remoteMemberIds = new Set((remoteMembers || []).map(m => m.id));
-    const unsyncedMembers = localMembers.filter(m => m && m.id && !remoteMemberIds.has(m.id));
-    const mergedMembers = [...(remoteMembers || []), ...unsyncedMembers];
-
-    // Merge logs
-    const remoteLogIds = new Set((remoteLogs || []).map(l => l.id));
-    const unsyncedLogs = localLogs.filter(l => l && l.id && !remoteLogIds.has(l.id));
-    const mergedLogs = [...(remoteLogs || []), ...unsyncedLogs];
-
-    // Merge badges
-    const remoteBadgeIds = new Set((remoteBadges || []).map(b => b.id));
-    const unsyncedBadges = localBadges.filter(b => b && b.id && !remoteBadgeIds.has(b.id));
-    const mergedBadges = [...(remoteBadges || []), ...unsyncedBadges];
-
-    // Merge audits
-    const remoteAuditIds = new Set((remoteAudits || []).map(a => a.id));
-    const unsyncedAudits = localAudits.filter(a => a && a.id && !remoteAuditIds.has(a.id));
-    const mergedAudits = [...(remoteAudits || []), ...unsyncedAudits];
-
-    // Save directly to localStorage to avoid trigger-happy sync loop calls
-    localStorage.setItem(STORAGE_KEYS.MEMBERS, JSON.stringify(mergedMembers));
-    localStorage.setItem(STORAGE_KEYS.LOGS, JSON.stringify(mergedLogs));
-    localStorage.setItem(STORAGE_KEYS.BADGES, JSON.stringify(mergedBadges));
-    localStorage.setItem(STORAGE_KEYS.AUDIT, JSON.stringify(mergedAudits));
+    // Direct online-first: overwrite local caches with server state
+    localStorage.setItem(STORAGE_KEYS.MEMBERS, JSON.stringify(remoteMembers || []));
+    localStorage.setItem(STORAGE_KEYS.LOGS, JSON.stringify(remoteLogs || []));
+    localStorage.setItem(STORAGE_KEYS.BADGES, JSON.stringify(remoteBadges || []));
+    localStorage.setItem(STORAGE_KEYS.AUDIT, JSON.stringify(remoteAudits || []));
 
     // Reload state and trigger UI render
-    state.members = mergedMembers;
-    state.auditTrails = mergedAudits;
-    updateState({});
-
-    // If there were any unsynced records, upload them silently to keep Supabase in sync
-    if (unsyncedMembers.length > 0) {
-      syncMultipleRecords('members', unsyncedMembers);
-    }
-    if (unsyncedLogs.length > 0) {
-      syncMultipleRecords('activity_logs', unsyncedLogs);
-    }
-    if (unsyncedBadges.length > 0) {
-      syncMultipleRecords('badges', unsyncedBadges);
-    }
-    if (unsyncedAudits.length > 0) {
-      syncMultipleRecords('audit_trails', unsyncedAudits);
-    }
-
-    console.log('Background silent sync (Pull + Smart Merge) completed successfully!');
+    state.members = remoteMembers || [];
+    state.auditTrails = remoteAudits || [];
+    updateState({ supabaseSyncing: false, supabaseConnectionStatus: 'connected', supabaseConnectionError: '' });
+    console.log('Background silent sync (Pull + Overwrite) completed successfully!');
     return true;
   } catch (err) {
-    console.warn('Background silent sync pull failed:', err);
+    console.error('Background silent sync pull failed:', err);
+    updateState({ supabaseSyncing: false, supabaseConnectionStatus: 'error', supabaseConnectionError: err.message });
     return false;
+  }
+}
+
+// Smart Diff Sync Helpers to make sure changes (updates, deletions, insertions) are written directly to Supabase
+export async function syncMembersDiff(newMembers) {
+  const client = getSupabase();
+  if (!client) return;
+  if (localStorage.getItem(STORAGE_KEYS.SUPABASE_SYNC_ENABLED) === 'false') return;
+
+  try {
+    const oldMembers = JSON.parse(localStorage.getItem(STORAGE_KEYS.MEMBERS) || '[]');
+    
+    // Find deleted members
+    const newMemberIds = new Set(newMembers.map(m => m.id));
+    const deletedMembers = oldMembers.filter(m => m && m.id && !newMemberIds.has(m.id));
+    
+    for (const dm of deletedMembers) {
+      console.log('Online Sync: Deleting member from Supabase:', dm.id, dm.name);
+      await client.from('members').delete().eq('id', dm.id);
+    }
+    
+    // Find new or modified members
+    const oldMemberMap = new Map(oldMembers.map(m => [m.id, m]));
+    const modifiedOrNewMembers = newMembers.filter(nm => {
+      const om = oldMemberMap.get(nm.id);
+      if (!om) return true; // New member
+      return (
+        nm.updated_at !== om.updated_at ||
+        nm.status !== om.status ||
+        nm.total_points !== om.total_points ||
+        nm.current_streak !== om.current_streak ||
+        nm.longest_streak !== om.longest_streak ||
+        nm.notes !== om.notes ||
+        nm.level !== om.level ||
+        nm.consecutive_inactive_days !== om.consecutive_inactive_days ||
+        nm.total_active_days !== om.total_active_days ||
+        nm.last_active_date !== om.last_active_date
+      );
+    });
+    
+    if (modifiedOrNewMembers.length > 0) {
+      console.log('Online Sync: Upserting modified/new members to Supabase:', modifiedOrNewMembers.length);
+      const { error } = await client.from('members').upsert(modifiedOrNewMembers);
+      if (error) throw error;
+    }
+  } catch (err) {
+    console.error('Error syncing members diff with Supabase:', err);
+  }
+}
+
+export async function syncLogsDiff(newLogs) {
+  const client = getSupabase();
+  if (!client) return;
+  if (localStorage.getItem(STORAGE_KEYS.SUPABASE_SYNC_ENABLED) === 'false') return;
+
+  try {
+    const oldLogs = JSON.parse(localStorage.getItem(STORAGE_KEYS.LOGS) || '[]');
+    const newLogIds = new Set(newLogs.map(l => l.id));
+    const deletedLogs = oldLogs.filter(l => l && l.id && !newLogIds.has(l.id));
+    
+    for (const dl of deletedLogs) {
+      console.log('Online Sync: Deleting log from Supabase:', dl.id);
+      await client.from('activity_logs').delete().eq('id', dl.id);
+    }
+    
+    const oldLogIds = new Set(oldLogs.map(l => l.id));
+    const addedLogs = newLogs.filter(nl => !oldLogIds.has(nl.id));
+    
+    if (addedLogs.length > 0) {
+      console.log('Online Sync: Upserting added logs to Supabase:', addedLogs.length);
+      const { error } = await client.from('activity_logs').upsert(addedLogs);
+      if (error) throw error;
+    }
+  } catch (err) {
+    console.error('Error syncing logs diff with Supabase:', err);
+  }
+}
+
+export async function syncBadgesDiff(newBadges) {
+  const client = getSupabase();
+  if (!client) return;
+  if (localStorage.getItem(STORAGE_KEYS.SUPABASE_SYNC_ENABLED) === 'false') return;
+
+  try {
+    const oldBadges = JSON.parse(localStorage.getItem(STORAGE_KEYS.BADGES) || '[]');
+    const newBadgeIds = new Set(newBadges.map(b => b.id));
+    const deletedBadges = oldBadges.filter(b => b && b.id && !newBadgeIds.has(b.id));
+    
+    for (const db of deletedBadges) {
+      console.log('Online Sync: Deleting badge from Supabase:', db.id);
+      await client.from('badges').delete().eq('id', db.id);
+    }
+    
+    const oldBadgeIds = new Set(oldBadges.map(b => b.id));
+    const addedBadges = newBadges.filter(nb => !oldBadgeIds.has(nb.id));
+    
+    if (addedBadges.length > 0) {
+      console.log('Online Sync: Upserting added badges to Supabase:', addedBadges.length);
+      const { error } = await client.from('badges').upsert(addedBadges);
+      if (error) throw error;
+    }
+  } catch (err) {
+    console.error('Error syncing badges diff with Supabase:', err);
+  }
+}
+
+export async function syncAuditTrailsDiff(newAudits) {
+  const client = getSupabase();
+  if (!client) return;
+  if (localStorage.getItem(STORAGE_KEYS.SUPABASE_SYNC_ENABLED) === 'false') return;
+
+  try {
+    const oldAudits = JSON.parse(localStorage.getItem(STORAGE_KEYS.AUDIT) || '[]');
+    const oldAuditIds = new Set(oldAudits.map(a => a.id));
+    const addedAudits = newAudits.filter(na => !oldAuditIds.has(na.id));
+    
+    if (addedAudits.length > 0) {
+      console.log('Online Sync: Upserting added audit trails to Supabase:', addedAudits.length);
+      const { error } = await client.from('audit_trails').upsert(addedAudits);
+      if (error) throw error;
+    }
+  } catch (err) {
+    console.error('Error syncing audits diff with Supabase:', err);
   }
 }
 
@@ -331,8 +427,8 @@ export function getMembers() {
 }
 
 export function saveMembers(members) {
+  syncMembersDiff(members);
   localStorage.setItem(STORAGE_KEYS.MEMBERS, JSON.stringify(members));
-  syncMultipleRecords('members', members);
 }
 
 export function getActivityLogs() {
@@ -340,8 +436,8 @@ export function getActivityLogs() {
 }
 
 export function saveActivityLogs(logs) {
+  syncLogsDiff(logs);
   localStorage.setItem(STORAGE_KEYS.LOGS, JSON.stringify(logs));
-  syncMultipleRecords('activity_logs', logs);
 }
 
 export function getAuditTrails() {
@@ -349,8 +445,8 @@ export function getAuditTrails() {
 }
 
 export function saveAuditTrails(trails) {
+  syncAuditTrailsDiff(trails);
   localStorage.setItem(STORAGE_KEYS.AUDIT, JSON.stringify(trails));
-  syncMultipleRecords('audit_trails', trails);
 }
 
 export function getBadges() {
@@ -358,8 +454,8 @@ export function getBadges() {
 }
 
 export function saveBadges(badges) {
+  syncBadgesDiff(badges);
   localStorage.setItem(STORAGE_KEYS.BADGES, JSON.stringify(badges));
-  syncMultipleRecords('badges', badges);
 }
 
 export function getCurrentAdmin() {
@@ -3150,9 +3246,7 @@ window.addEventListener('DOMContentLoaded', () => {
   }
 
   // Instantly perform a silent background sync on load to ensure up-to-date data on other devices
-  setTimeout(() => {
-    silentPullFromSupabase();
-  }, 1000);
+  silentPullFromSupabase();
 
   // Periodic automatic sync every 2 minutes (120,000 ms)
   setInterval(() => {
