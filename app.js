@@ -655,7 +655,9 @@ let deferredPrompt = null;
 
 // State Machine
 let state = {
-  currentTab: 'members',
+  currentTab: 'leaderboards',
+  isFabOpen: false,
+  isHeaderMenuOpen: false,
   currentAdminEmail: getCurrentAdmin(),
   members: [],
   auditTrails: [],
@@ -1157,57 +1159,89 @@ function render() {
       </div>
       ` : ''}
 
-      <div class="flex overflow-x-auto bg-slate-900 border border-slate-800 p-1.5 rounded-2xl gap-1 no-scrollbar">
-        <button data-tab="members" class="tab-btn flex items-center gap-3 px-4 py-2.5 rounded-xl font-bold text-xs transition duration-150 whitespace-nowrap cursor-pointer ${
-          state.currentTab === 'members'
-            ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/20 shadow-sm'
-            : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
-        }">
-          <span class="w-1.5 h-1.5 rounded-full ${state.currentTab === 'members' ? 'bg-indigo-400' : 'bg-slate-600'}"></span>
-          <i data-lucide="users" class="w-3.5 h-3.5"></i>
-          Member Directory
-        </button>
+      <div class="sticky top-[73px] z-30 pb-4 pt-2 -mx-4 px-4 sm:mx-0 sm:px-0 bg-slate-950/80 backdrop-blur-lg border-b border-slate-900/50 sm:border-none">
+        <div class="max-w-3xl mx-auto bg-slate-900/90 border border-slate-800/80 p-3 sm:p-4 rounded-3xl shadow-[0_16px_40px_rgba(0,0,0,0.6)]">
+          <div class="grid grid-cols-5 gap-1.5 sm:gap-4 justify-items-center">
+            
+            <!-- App Icon 1: Leaderboard -->
+            <button data-tab="leaderboards" class="tab-btn flex flex-col items-center gap-1.5 focus:outline-none transition group cursor-pointer w-full max-w-[80px]">
+              <div class="w-10 h-10 sm:w-14 sm:h-14 rounded-2xl flex items-center justify-center transition-all duration-300 transform group-hover:scale-105 active:scale-95 ${
+                state.currentTab === 'leaderboards'
+                  ? 'bg-gradient-to-tr from-amber-500 to-yellow-600 text-slate-950 shadow-[0_0_20px_rgba(245,158,11,0.45)] ring-2 ring-amber-400'
+                  : 'bg-slate-950 border border-slate-850 text-slate-400 group-hover:text-amber-400 group-hover:border-slate-700 shadow-[inset_0_1px_1px_rgba(255,255,255,0.03)]'
+              }">
+                <i data-lucide="trophy" class="w-4 h-4 sm:w-6 sm:h-6"></i>
+              </div>
+              <span class="text-[8px] sm:text-xs font-black tracking-tight text-center leading-tight transition-colors ${
+                state.currentTab === 'leaderboards' ? 'text-amber-400 font-extrabold' : 'text-slate-400 group-hover:text-slate-200'
+              }">লিডারবোর্ড</span>
+              ${state.currentTab === 'leaderboards' ? '<div class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse shadow-[0_0_8px_#fbbf24]"></div>' : ''}
+            </button>
 
-        <button data-tab="bulk_input" class="tab-btn flex items-center gap-3 px-4 py-2.5 rounded-xl font-bold text-xs transition duration-150 whitespace-nowrap cursor-pointer ${
-          state.currentTab === 'bulk_input'
-            ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/20 shadow-sm'
-            : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
-        }">
-          <span class="w-1.5 h-1.5 rounded-full ${state.currentTab === 'bulk_input' ? 'bg-indigo-400' : 'bg-slate-600'}"></span>
-          <i data-lucide="clipboard-list" class="w-3.5 h-3.5"></i>
-          Activity Tracker (Link Input)
-        </button>
+            <!-- App Icon 2: Directory -->
+            <button data-tab="members" class="tab-btn flex flex-col items-center gap-1.5 focus:outline-none transition group cursor-pointer w-full max-w-[80px]">
+              <div class="w-10 h-10 sm:w-14 sm:h-14 rounded-2xl flex items-center justify-center transition-all duration-300 transform group-hover:scale-105 active:scale-95 ${
+                state.currentTab === 'members'
+                  ? 'bg-gradient-to-tr from-emerald-500 to-teal-600 text-slate-950 shadow-[0_0_20px_rgba(16,185,129,0.45)] ring-2 ring-emerald-400'
+                  : 'bg-slate-950 border border-slate-850 text-slate-400 group-hover:text-emerald-400 group-hover:border-slate-700 shadow-[inset_0_1px_1px_rgba(255,255,255,0.03)]'
+              }">
+                <i data-lucide="users" class="w-4 h-4 sm:w-6 sm:h-6"></i>
+              </div>
+              <span class="text-[8px] sm:text-xs font-black tracking-tight text-center leading-tight transition-colors ${
+                state.currentTab === 'members' ? 'text-emerald-400 font-extrabold' : 'text-slate-400 group-hover:text-slate-200'
+              }">ডিরেক্টরি</span>
+              ${state.currentTab === 'members' ? '<div class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_8px_#34d399]"></div>' : ''}
+            </button>
 
-        <button data-tab="notices" class="tab-btn flex items-center gap-3 px-4 py-2.5 rounded-xl font-bold text-xs transition duration-150 whitespace-nowrap cursor-pointer ${
-          state.currentTab === 'notices'
-            ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/20 shadow-sm'
-            : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
-        }">
-          <span class="w-1.5 h-1.5 rounded-full ${state.currentTab === 'notices' ? 'bg-indigo-400' : 'bg-slate-600'}"></span>
-          <i data-lucide="megaphone" class="w-3.5 h-3.5"></i>
-          Notice Generator
-        </button>
+            <!-- App Icon 3: Link Tracker -->
+            <button data-tab="bulk_input" class="tab-btn flex flex-col items-center gap-1.5 focus:outline-none transition group cursor-pointer w-full max-w-[80px]">
+              <div class="w-10 h-10 sm:w-14 sm:h-14 rounded-2xl flex items-center justify-center transition-all duration-300 transform group-hover:scale-105 active:scale-95 ${
+                state.currentTab === 'bulk_input'
+                  ? 'bg-gradient-to-tr from-indigo-500 to-blue-600 text-white shadow-[0_0_20px_rgba(99,102,241,0.45)] ring-2 ring-indigo-400'
+                  : 'bg-slate-950 border border-slate-850 text-slate-400 group-hover:text-indigo-400 group-hover:border-slate-700 shadow-[inset_0_1px_1px_rgba(255,255,255,0.03)]'
+              }">
+                <i data-lucide="clipboard-list" class="w-4 h-4 sm:w-6 sm:h-6"></i>
+              </div>
+              <span class="text-[8px] sm:text-xs font-black tracking-tight text-center leading-tight transition-colors ${
+                state.currentTab === 'bulk_input' ? 'text-indigo-400 font-extrabold' : 'text-slate-400 group-hover:text-slate-200'
+              }">লিংক ট্র্যাকার</span>
+              ${state.currentTab === 'bulk_input' ? '<div class="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse shadow-[0_0_8px_#818cf8]"></div>' : ''}
+            </button>
 
-        <button data-tab="leaderboards" class="tab-btn flex items-center gap-3 px-4 py-2.5 rounded-xl font-bold text-xs transition duration-150 whitespace-nowrap cursor-pointer ${
-          state.currentTab === 'leaderboards'
-            ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/20 shadow-sm'
-            : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
-        }">
-          <span class="w-1.5 h-1.5 rounded-full ${state.currentTab === 'leaderboards' ? 'bg-indigo-400' : 'bg-slate-600'}"></span>
-          <i data-lucide="trophy" class="w-3.5 h-3.5"></i>
-          Leaderboards & Stats
-        </button>
+            <!-- App Icon 4: Notice -->
+            <button data-tab="notices" class="tab-btn flex flex-col items-center gap-1.5 focus:outline-none transition group cursor-pointer w-full max-w-[80px]">
+              <div class="w-10 h-10 sm:w-14 sm:h-14 rounded-2xl flex items-center justify-center transition-all duration-300 transform group-hover:scale-105 active:scale-95 ${
+                state.currentTab === 'notices'
+                  ? 'bg-gradient-to-tr from-rose-500 to-orange-600 text-white shadow-[0_0_20px_rgba(244,63,94,0.45)] ring-2 ring-rose-400'
+                  : 'bg-slate-950 border border-slate-850 text-slate-400 group-hover:text-rose-400 group-hover:border-slate-700 shadow-[inset_0_1px_1px_rgba(255,255,255,0.03)]'
+              }">
+                <i data-lucide="megaphone" class="w-4 h-4 sm:w-6 sm:h-6"></i>
+              </div>
+              <span class="text-[8px] sm:text-xs font-black tracking-tight text-center leading-tight transition-colors ${
+                state.currentTab === 'notices' ? 'text-rose-400 font-extrabold' : 'text-slate-400 group-hover:text-slate-200'
+              }">নোটিশ</span>
+              ${state.currentTab === 'notices' ? '<div class="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse shadow-[0_0_8px_#fb7185]"></div>' : ''}
+            </button>
 
-        <button data-tab="reports" class="tab-btn flex items-center gap-3 px-4 py-2.5 rounded-xl font-bold text-xs transition duration-150 whitespace-nowrap cursor-pointer ${
-          state.currentTab === 'reports'
-            ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/20 shadow-sm'
-            : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
-        }">
-          <span class="w-1.5 h-1.5 rounded-full ${state.currentTab === 'reports' ? 'bg-indigo-400' : 'bg-slate-600'}"></span>
-          <i data-lucide="trending-up" class="w-3.5 h-3.5"></i>
-          Performance Report Card
-        </button>
+            <!-- App Icon 5: Report Card -->
+            <button data-tab="reports" class="tab-btn flex flex-col items-center gap-1.5 focus:outline-none transition group cursor-pointer w-full max-w-[80px]">
+              <div class="w-10 h-10 sm:w-14 sm:h-14 rounded-2xl flex items-center justify-center transition-all duration-300 transform group-hover:scale-105 active:scale-95 ${
+                state.currentTab === 'reports'
+                  ? 'bg-gradient-to-tr from-cyan-500 to-sky-600 text-slate-950 shadow-[0_0_20px_rgba(6,182,212,0.45)] ring-2 ring-cyan-400'
+                  : 'bg-slate-950 border border-slate-850 text-slate-400 group-hover:text-cyan-400 group-hover:border-slate-700 shadow-[inset_0_1px_1px_rgba(255,255,255,0.03)]'
+              }">
+                <i data-lucide="trending-up" class="w-4 h-4 sm:w-6 sm:h-6"></i>
+              </div>
+              <span class="text-[8px] sm:text-xs font-black tracking-tight text-center leading-tight transition-colors ${
+                state.currentTab === 'reports' ? 'text-cyan-400 font-extrabold' : 'text-slate-400 group-hover:text-slate-200'
+              }">রিপোর্ট কার্ড</span>
+              ${state.currentTab === 'reports' ? '<div class="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse shadow-[0_0_8px_#22d3ee]"></div>' : ''}
+            </button>
+
+          </div>
+        </div>
       </div>
+
 
       <!-- Main Tab Content Render Target -->
       <div id="tab-content-root" class="fade-in min-h-[400px]">
@@ -1252,6 +1286,75 @@ function render() {
         </div>
       </div>
     </footer>
+
+    <!-- Floating Action Menu (FAB / App Icon Launcher) -->
+    <div class="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3">
+      ${state.isFabOpen ? `
+      <!-- Animated Expanded Circular/List Navigation Options -->
+      <div class="flex flex-col items-end gap-2.5 mb-2 animate-[slideUp_0.2s_ease-out_forwards]">
+        
+        <div class="text-[9px] bg-slate-950 border border-slate-800 text-slate-400 font-bold px-2 py-1 rounded-lg uppercase tracking-wider mb-1">
+          Quick Sections
+        </div>
+
+        <button data-tab="leaderboards" class="tab-btn flex items-center gap-2.5 bg-slate-950/95 border border-slate-800 hover:border-indigo-500/50 hover:bg-slate-900 px-4 py-2.5 rounded-2xl shadow-xl transition-all hover:translate-x-[-4px] group cursor-pointer ${
+          state.currentTab === 'leaderboards' ? 'border-indigo-500 text-indigo-400 bg-indigo-950/20' : ''
+        }">
+          <span class="text-xs font-bold text-slate-300 group-hover:text-white transition">লিডারবোর্ড (Leaderboards)</span>
+          <div class="bg-indigo-950/40 p-1.5 rounded-lg text-indigo-400 group-hover:bg-indigo-600/20 transition border border-indigo-500/10">
+            <i data-lucide="trophy" class="w-4 h-4"></i>
+          </div>
+        </button>
+
+        <button data-tab="members" class="tab-btn flex items-center gap-2.5 bg-slate-950/95 border border-slate-800 hover:border-indigo-500/50 hover:bg-slate-900 px-4 py-2.5 rounded-2xl shadow-xl transition-all hover:translate-x-[-4px] group cursor-pointer ${
+          state.currentTab === 'members' ? 'border-indigo-500 text-indigo-400 bg-indigo-950/20' : ''
+        }">
+          <span class="text-xs font-bold text-slate-300 group-hover:text-white transition">মেম্বার ডিরেক্টরি (Members)</span>
+          <div class="bg-indigo-950/40 p-1.5 rounded-lg text-indigo-400 group-hover:bg-indigo-600/20 transition border border-indigo-500/10">
+            <i data-lucide="users" class="w-4 h-4"></i>
+          </div>
+        </button>
+
+        <button data-tab="bulk_input" class="tab-btn flex items-center gap-2.5 bg-slate-950/95 border border-slate-800 hover:border-indigo-500/50 hover:bg-slate-900 px-4 py-2.5 rounded-2xl shadow-xl transition-all hover:translate-x-[-4px] group cursor-pointer ${
+          state.currentTab === 'bulk_input' ? 'border-indigo-500 text-indigo-400 bg-indigo-950/20' : ''
+        }">
+          <span class="text-xs font-bold text-slate-300 group-hover:text-white transition">লিংক ট্র্যাকার (Activity Tracker)</span>
+          <div class="bg-indigo-950/40 p-1.5 rounded-lg text-indigo-400 group-hover:bg-indigo-600/20 transition border border-indigo-500/10">
+            <i data-lucide="clipboard-list" class="w-4 h-4"></i>
+          </div>
+        </button>
+
+        <button data-tab="notices" class="tab-btn flex items-center gap-2.5 bg-slate-950/95 border border-slate-800 hover:border-indigo-500/50 hover:bg-slate-900 px-4 py-2.5 rounded-2xl shadow-xl transition-all hover:translate-x-[-4px] group cursor-pointer ${
+          state.currentTab === 'notices' ? 'border-indigo-500 text-indigo-400 bg-indigo-950/20' : ''
+        }">
+          <span class="text-xs font-bold text-slate-300 group-hover:text-white transition">নোটিশ জেনারেটর (Notice)</span>
+          <div class="bg-indigo-950/40 p-1.5 rounded-lg text-indigo-400 group-hover:bg-indigo-600/20 transition border border-indigo-500/10">
+            <i data-lucide="megaphone" class="w-4 h-4"></i>
+          </div>
+        </button>
+
+        <button data-tab="reports" class="tab-btn flex items-center gap-2.5 bg-slate-950/95 border border-slate-800 hover:border-indigo-500/50 hover:bg-slate-900 px-4 py-2.5 rounded-2xl shadow-xl transition-all hover:translate-x-[-4px] group cursor-pointer ${
+          state.currentTab === 'reports' ? 'border-indigo-500 text-indigo-400 bg-indigo-950/20' : ''
+        }">
+          <span class="text-xs font-bold text-slate-300 group-hover:text-white transition">রিপোর্ট কার্ড (Report Card)</span>
+          <div class="bg-indigo-950/40 p-1.5 rounded-lg text-indigo-400 group-hover:bg-indigo-600/20 transition border border-indigo-500/10">
+            <i data-lucide="trending-up" class="w-4 h-4"></i>
+          </div>
+        </button>
+      </div>
+      ` : ''}
+
+      <!-- Main Floating App Icon Button -->
+      <button id="floating-menu-trigger" class="w-14 h-14 bg-indigo-600 hover:bg-indigo-500 rounded-full flex items-center justify-center text-white shadow-[0_4px_24px_rgba(99,102,241,0.5)] transition-all duration-300 transform hover:scale-105 active:scale-95 cursor-pointer border border-indigo-400/30 relative overflow-hidden group">
+        <span class="absolute inset-0 bg-gradient-to-tr from-indigo-700 via-transparent to-white/10 opacity-0 group-hover:opacity-100 transition-opacity"></span>
+        <div class="relative transition-transform duration-300 ${state.isFabOpen ? 'rotate-90' : 'rotate-0'}">
+          ${state.isFabOpen 
+            ? '<i data-lucide="x" class="w-6 h-6"></i>' 
+            : '<i data-lucide="layout-grid" class="w-6 h-6"></i>'
+          }
+        </div>
+      </button>
+    </div>
 
     ${state.showRegisterModal ? `
     <div id="register-member-modal" class="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 flex items-center justify-center p-4">
@@ -1697,12 +1800,11 @@ function renderTabContent(totalCount, activeCount, inactiveCount, diamondCount) 
               
               <div class="max-h-40 overflow-y-auto space-y-1.5 pr-1 divide-y divide-slate-850/40 font-mono text-[10px]">
                 ${unregisteredNames.length > 0 ? unregisteredNames.map(name => {
-                  const isChecked = !state.uncheckedUnregisteredNames.includes(name);
                   return `
                     <div class="flex justify-between items-center py-2 px-1 hover:bg-slate-950/30 rounded-lg">
                       <label class="flex items-center gap-2 cursor-pointer select-none">
-                        <input type="checkbox" data-new-name-check="${name}" class="new-member-checkbox rounded border-slate-800 text-amber-500 focus:ring-amber-500/20 w-4.5 h-4.5 bg-slate-950 cursor-pointer" ${isChecked ? 'checked' : ''} />
-                        <span class="${isChecked ? 'text-amber-400 font-bold' : 'text-slate-400'} transition-all">${name}</span>
+                        <input type="checkbox" data-new-name-check="${name}" class="new-member-checkbox rounded border-slate-800 text-amber-500 focus:ring-amber-500/20 w-4.5 h-4.5 bg-slate-950 cursor-pointer" checked />
+                        <span class="new-member-name-label text-amber-400 font-bold transition-all">${name}</span>
                       </label>
                       <button data-quick-add-name="${name}" class="text-indigo-400 hover:text-indigo-300 font-bold flex items-center gap-1 cursor-pointer">
                         <i data-lucide="plus-circle" class="w-3.5 h-3.5"></i> Add
@@ -1716,9 +1818,9 @@ function renderTabContent(totalCount, activeCount, inactiveCount, diamondCount) 
 
               ${unregisteredNames.length > 0 ? `
                 <div class="mt-4 pt-3 border-t border-slate-800/60">
-                  <button id="register-selected-new-btn" class="w-full bg-amber-600 hover:bg-amber-500 text-slate-950 font-extrabold text-[11px] py-2.5 rounded-xl shadow-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer" ${unregisteredNames.filter(n => !state.uncheckedUnregisteredNames.includes(n)).length === 0 ? 'disabled' : ''}>
+                  <button id="register-selected-new-btn" class="w-full bg-amber-600 hover:bg-amber-500 text-slate-950 font-extrabold text-[11px] py-2.5 rounded-xl shadow-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer">
                     <i data-lucide="user-plus" class="w-4 h-4"></i>
-                    Bulk Register Selected (${unregisteredNames.filter(n => !state.uncheckedUnregisteredNames.includes(n)).length}) New Members
+                    Bulk Register Selected (<span id="bulk-register-count">${unregisteredNames.length}</span>) New Members
                   </button>
                 </div>
               ` : ''}
@@ -2131,8 +2233,8 @@ ${listText}
                 <div class="space-y-4">
                   <!-- Printable report card block -->
                   <div id="printable-report-card" class="bg-slate-950 border border-slate-800 rounded-2xl p-6 md:p-8 shadow-2xl relative overflow-hidden space-y-6">
-                    <div class="absolute right-0 top-0 w-64 h-64 bg-indigo-500/5 rounded-full blur-3xl -z-10 pointer-events-none"></div>
-                    <div class="absolute left-10 bottom-0 w-64 h-64 bg-emerald-500/5 rounded-full blur-3xl -z-10 pointer-events-none"></div>
+                    <div data-html2canvas-ignore="true" class="absolute right-0 top-0 w-64 h-64 bg-indigo-500/5 rounded-full blur-3xl -z-10 pointer-events-none"></div>
+                    <div data-html2canvas-ignore="true" class="absolute left-10 bottom-0 w-64 h-64 bg-emerald-500/5 rounded-full blur-3xl -z-10 pointer-events-none"></div>
 
                     <!-- Header -->
                     <div class="flex flex-col sm:flex-row justify-between sm:items-start border-b border-slate-800 pb-5 gap-3">
@@ -2273,9 +2375,47 @@ function bindEvents() {
   document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.onclick = (e) => {
       const targetTab = e.currentTarget.getAttribute('data-tab');
-      updateState({ currentTab: targetTab });
+      updateState({ 
+        currentTab: targetTab,
+        isFabOpen: false,
+        isHeaderMenuOpen: false
+      });
     };
   });
+
+  // Floating FAB click handler
+  const fabTrigger = document.getElementById('floating-menu-trigger');
+  if (fabTrigger) {
+    fabTrigger.onclick = (e) => {
+      e.stopPropagation();
+      updateState({ isFabOpen: !state.isFabOpen });
+    };
+  }
+
+  // Header Dropdown Trigger click handler
+  const navDropdownTrigger = document.getElementById('nav-dropdown-trigger');
+  if (navDropdownTrigger) {
+    navDropdownTrigger.onclick = (e) => {
+      e.stopPropagation();
+      updateState({ isHeaderMenuOpen: !state.isHeaderMenuOpen });
+    };
+  }
+
+  // Close menus when clicking outside
+  document.onclick = (e) => {
+    let changed = false;
+    if (state.isFabOpen && !e.target.closest('#floating-menu-trigger') && !e.target.closest('[data-tab]')) {
+      state.isFabOpen = false;
+      changed = true;
+    }
+    if (state.isHeaderMenuOpen && !e.target.closest('#nav-dropdown-trigger') && !e.target.closest('#nav-dropdown-menu')) {
+      state.isHeaderMenuOpen = false;
+      changed = true;
+    }
+    if (changed) {
+      render();
+    }
+  };
 
   // Admin selector changes
   const selector = document.getElementById('admin-selector');
@@ -2632,19 +2772,40 @@ function bindEvents() {
       };
     });
 
-    // Checkbox toggling for unregistered names
+    // Update local UI when a checkbox is toggled
+    const updateBulkRegisterUI = () => {
+      const checkedBoxes = document.querySelectorAll('.new-member-checkbox:checked');
+      const countSpan = document.getElementById('bulk-register-count');
+      const regBtn = document.getElementById('register-selected-new-btn');
+      
+      if (countSpan) {
+        countSpan.textContent = checkedBoxes.length;
+      }
+      if (regBtn) {
+        if (checkedBoxes.length === 0) {
+          regBtn.disabled = true;
+          regBtn.classList.add('opacity-50', 'cursor-not-allowed');
+          regBtn.classList.remove('hover:bg-amber-500');
+        } else {
+          regBtn.disabled = false;
+          regBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+          regBtn.classList.add('hover:bg-amber-500');
+        }
+      }
+    };
+
+    // Checkbox toggling for unregistered names (local and native, no full-page re-renders!)
     document.querySelectorAll('.new-member-checkbox').forEach(chk => {
       chk.onchange = (e) => {
-        const name = e.target.getAttribute('data-new-name-check');
-        let uncheckedNames = [...state.uncheckedUnregisteredNames];
-        if (e.target.checked) {
-          uncheckedNames = uncheckedNames.filter(n => n !== name);
-        } else {
-          if (!uncheckedNames.includes(name)) {
-            uncheckedNames.push(name);
+        const label = e.target.nextElementSibling;
+        if (label) {
+          if (e.target.checked) {
+            label.className = 'new-member-name-label text-amber-400 font-bold transition-all';
+          } else {
+            label.className = 'new-member-name-label text-slate-400 transition-all';
           }
         }
-        updateState({ uncheckedUnregisteredNames: uncheckedNames });
+        updateBulkRegisterUI();
       };
     });
 
@@ -2652,7 +2813,12 @@ function bindEvents() {
     const selectAllNewBtn = document.getElementById('select-all-new-btn');
     if (selectAllNewBtn) {
       selectAllNewBtn.onclick = () => {
-        updateState({ uncheckedUnregisteredNames: [] });
+        document.querySelectorAll('.new-member-checkbox').forEach(chk => {
+          chk.checked = true;
+          const label = chk.nextElementSibling;
+          if (label) label.className = 'new-member-name-label text-amber-400 font-bold transition-all';
+        });
+        updateBulkRegisterUI();
       };
     }
 
@@ -2660,8 +2826,12 @@ function bindEvents() {
     const deselectAllNewBtn = document.getElementById('deselect-all-new-btn');
     if (deselectAllNewBtn) {
       deselectAllNewBtn.onclick = () => {
-        const { unregisteredNames } = parseBulkActivityText(state.bulkInputText);
-        updateState({ uncheckedUnregisteredNames: unregisteredNames });
+        document.querySelectorAll('.new-member-checkbox').forEach(chk => {
+          chk.checked = false;
+          const label = chk.nextElementSibling;
+          if (label) label.className = 'new-member-name-label text-slate-400 transition-all';
+        });
+        updateBulkRegisterUI();
       };
     }
 
@@ -2669,18 +2839,24 @@ function bindEvents() {
     const registerSelectedNewBtn = document.getElementById('register-selected-new-btn');
     if (registerSelectedNewBtn) {
       registerSelectedNewBtn.onclick = () => {
-        const { unregisteredNames } = parseBulkActivityText(state.bulkInputText);
-        const namesToReg = unregisteredNames.filter(n => !state.uncheckedUnregisteredNames.includes(n));
+        const checkedBoxes = document.querySelectorAll('.new-member-checkbox:checked');
+        const namesToReg = [];
+        checkedBoxes.forEach(cb => {
+          namesToReg.push(cb.getAttribute('data-new-name-check'));
+        });
+        
         if (namesToReg.length === 0) return;
         
         if (confirm(`আপনি কি সত্যিই নির্বাচিত ${namesToReg.length} জন নতুন মেম্বারকে একসাথে ডেটাবেজে রেজিস্টার করতে চান?`)) {
-          const successCount = handleBulkAddMembers(namesToReg);
+          const result = handleBulkAddMembers(namesToReg);
           
-          if (successCount > 0) {
-            alert(`${successCount} জন নতুন মেম্বার সফলভাবে ডাটাবেজে রেজিস্টার হয়েছে এবং এখন তাদের একটিভ মেম্বার হিসেবে ট্র্যাকার চেকলিস্টে পাওয়া যাবে!`);
-            updateState({
-              uncheckedUnregisteredNames: state.uncheckedUnregisteredNames.filter(n => !namesToReg.includes(n))
-            });
+          if (result.successCount > 0) {
+            let msg = `${result.successCount} জন নতুন মেম্বার সফলভাবে ডাটাবেজে রেজিস্টার হয়েছে এবং এখন তাদের একটিভ মেম্বার হিসেবে ট্র্যাকার চেকলিস্টে পাওয়া যাবে!`;
+            if (result.duplicateNames.length > 0) {
+              msg += ` (এবং ${result.duplicateNames.length} জন অলরেডি রেজিস্টার্ড থাকায় বাদ দেওয়া হয়েছে)`;
+            }
+            alert(msg);
+            updateState({});
           } else {
             alert('কোনো নতুন মেম্বার রেজিস্টার করা যায়নি। হয়তো তারা ইতিমধ্যে রেজিস্টার্ড!');
           }
@@ -2786,7 +2962,8 @@ function bindEvents() {
         updateState({ isDownloadingReport: true });
 
         setTimeout(() => {
-          html2canvas(reportCard, {
+          const html2canvasFn = window.html2canvas || html2canvas;
+          html2canvasFn(reportCard, {
             scale: 2, // high crisp definitions
             backgroundColor: '#020617', // deep dark theme
             logging: false,
