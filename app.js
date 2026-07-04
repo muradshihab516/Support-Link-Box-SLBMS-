@@ -36,9 +36,12 @@ let realtimeChannel = null;
 export function getSupabase() {
   if (cachedSupabaseClient) return cachedSupabaseClient;
 
-  const url = 'https://ngakeapuvnwfvfoqvidc.supabase.co';
-  const key = 'sb_publishable_UKs0BaYRcXvHCVwsi1ZeNA_UyNbWLWC';
+  const url = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_URL) || localStorage.getItem(STORAGE_KEYS.SUPABASE_URL) || '';
+  const key = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_KEY) || localStorage.getItem(STORAGE_KEYS.SUPABASE_KEY) || '';
 
+  if (!url || !key) {
+    return null;
+  }
   if (!window.supabase) {
     console.warn('Supabase JS library CDN is not loaded yet.');
     return null;
@@ -147,15 +150,51 @@ export async function testSupabaseConnection() {
   }
   updateState({ supabaseConnectionStatus: 'connecting', supabaseConnectionError: '' });
   try {
-    const { error } = await client.from('members').select('id').limit(1);
-    if (error) throw error;
+    // 1. Try a SELECT to verify connection and table existence
+    const { error: selectError } = await client.from('members').select('id').limit(1);
+    if (selectError) {
+      throw new Error(`Select Test Failed: ${selectError.message}`);
+    }
+
+    // 2. Try an INSERT to verify that RLS is not blocking client writes
+    const testId = `test-conn-${Date.now()}`;
+    const testMember = {
+      id: testId,
+      name: 'System Test Connection',
+      display_name: '@testconn',
+      status: 'active',
+      level: 'Bronze',
+      total_points: 0,
+      current_streak: 0,
+      longest_streak: 0,
+      total_active_days: 0,
+      last_active_date: null,
+      consecutive_inactive_days: 0,
+      notes: 'temp_test_connection_record'
+    };
+
+    const { error: insertError } = await client.from('members').insert([testMember]);
+    if (insertError) {
+      if (insertError.message.includes('row-level security') || insertError.code === '42501') {
+        throw new Error(`RLS_BLOCKED: ${insertError.message}`);
+      }
+      throw new Error(`Insert Test Failed: ${insertError.message}`);
+    }
+
+    // 3. Clean up the test row
+    await client.from('members').delete().eq('id', testId);
+
     updateState({ supabaseConnectionStatus: 'connected', supabaseConnectionError: '' });
     return true;
   } catch (err) {
     console.error('Supabase Connection Test Error:', err);
+    let friendlyError = err.message || 'Connection failed';
+    if (friendlyError.includes('RLS_BLOCKED') || friendlyError.includes('row-level security')) {
+      friendlyError = 'RLS_BLOCKED: Row-Level Security is active! RLS-এর কারণে ডাটা আপলোড ব্লক হয়ে আছে।';
+    }
     updateState({ 
       supabaseConnectionStatus: 'error', 
-      supabaseConnectionError: err.message || err.details || 'Connection failed' 
+      supabaseConnectionError: friendlyError 
     });
     return false;
   }
@@ -621,13 +660,13 @@ let state = {
   generatedPngMemberName: '',
   showPwaInstallBanner: false,
   showRegisterModal: false,
-  supabaseUrl: localStorage.getItem('support_linkbox_supabase_url') || (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_URL) || 'https://ngakeapuvnwfvfoqvidc.supabase.co',
-  supabaseKey: localStorage.getItem('support_linkbox_supabase_key') || (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_KEY) || 'sb_publishable_UKs0BaYRcXvHCVwsi1ZeNA_UyNbWLWC',
+  supabaseUrl: localStorage.getItem('support_linkbox_supabase_url') || (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_URL) || '',
+  supabaseKey: localStorage.getItem('support_linkbox_supabase_key') || (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_KEY) || '',
   supabaseSyncEnabled: localStorage.getItem('support_linkbox_supabase_sync_enabled') !== 'false',
   supabaseConnectionStatus: 'idle',
   supabaseConnectionError: '',
   supabaseSyncing: false,
-  loadedFromEnv: !localStorage.getItem('support_linkbox_supabase_url') && (!!(typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_URL) || true),
+  loadedFromEnv: !localStorage.getItem('support_linkbox_supabase_url') && !!(typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_URL),
   showUrlInput: false,
   showKeyInput: false,
   uncheckedUnregisteredNames: [],
@@ -660,24 +699,24 @@ export function initSupabaseConfig() {
       urlObj.searchParams.delete('key');
       window.history.replaceState({}, document.title, urlObj.pathname + urlObj.search);
       
-      state.supabaseUrl = localStorage.getItem(STORAGE_KEYS.SUPABASE_URL) || 'https://ngakeapuvnwfvfoqvidc.supabase.co';
-      state.supabaseKey = localStorage.getItem(STORAGE_KEYS.SUPABASE_KEY) || 'sb_publishable_UKs0BaYRcXvHCVwsi1ZeNA_UyNbWLWC';
+      state.supabaseUrl = localStorage.getItem(STORAGE_KEYS.SUPABASE_URL) || '';
+      state.supabaseKey = localStorage.getItem(STORAGE_KEYS.SUPABASE_KEY) || '';
       state.loadedFromEnv = false;
     }
   } catch (e) {
     console.error('Error parsing URL query parameters for Supabase configuration:', e);
   }
 
-  // If no localStorage, fallback to environment secrets or default values
+  // If no localStorage, fallback to environment secrets
   if (!state.supabaseUrl) {
-    const envUrl = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_URL) || 'https://ngakeapuvnwfvfoqvidc.supabase.co';
+    const envUrl = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_URL) || '';
     if (envUrl) {
       state.supabaseUrl = envUrl;
       state.loadedFromEnv = true;
     }
   }
   if (!state.supabaseKey) {
-    const envKey = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_KEY) || 'sb_publishable_UKs0BaYRcXvHCVwsi1ZeNA_UyNbWLWC';
+    const envKey = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_KEY) || '';
     if (envKey) {
       state.supabaseKey = envKey;
       state.loadedFromEnv = true;
@@ -1149,16 +1188,6 @@ function render() {
           <span class="w-1.5 h-1.5 rounded-full ${state.currentTab === 'reports' ? 'bg-indigo-400' : 'bg-slate-600'}"></span>
           <i data-lucide="trending-up" class="w-3.5 h-3.5"></i>
           Performance Report Card
-        </button>
-
-        <button data-tab="supabase" class="tab-btn flex items-center gap-3 px-4 py-2.5 rounded-xl font-bold text-xs transition duration-150 whitespace-nowrap cursor-pointer ml-auto ${
-          state.currentTab === 'supabase'
-            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shadow-sm'
-            : 'text-slate-400 hover:text-emerald-400 hover:bg-slate-800/40'
-        }">
-          <span class="w-1.5 h-1.5 rounded-full ${state.currentTab === 'supabase' ? 'bg-emerald-400' : 'bg-slate-600'}"></span>
-          <i data-lucide="database" class="w-3.5 h-3.5"></i>
-          Developer Database Setting
         </button>
       </div>
 
@@ -2436,11 +2465,47 @@ export async function fetchSupabaseMembers() {
                   </div>
                 </div>
 
-                ${state.supabaseConnectionError ? `
+                ${state.supabaseConnectionError ? (state.supabaseConnectionError.includes('RLS_BLOCKED') ? `
+                  <div class="p-4 bg-rose-500/10 border border-rose-500/20 text-rose-300 text-xs rounded-xl space-y-3 leading-relaxed">
+                    <div class="flex items-center gap-2 text-rose-400 font-extrabold text-sm">
+                      <i data-lucide="shield-alert" class="w-5 h-5 text-rose-400 animate-pulse"></i>
+                      🚨 RLS (Row-Level Security) এলার্ট!
+                    </div>
+                    <p>
+                      আপনার Supabase ডাটাবেজের টেবিলে <strong>Row-Level Security (RLS)</strong> সক্রিয় থাকার কারণে আপনার ব্রাউজার থেকে ক্লাউডে ডাটা পাঠানো বা নেওয়া সম্পূর্ণ ব্লক হয়ে আছে! 
+                    </p>
+                    <p class="font-semibold text-slate-200">
+                      এটি ঠিক করার জন্য নিচের ৩টি সহজ ধাপ সম্পন্ন করুন:
+                    </p>
+                    <ol class="list-decimal pl-4 space-y-1.5 text-slate-300">
+                      <li>প্রথমে আপনার <strong>Supabase Dashboard</strong>-এ যান।</li>
+                      <li>বাম পাশের মেনু থেকে <strong>SQL Editor</strong>-এ ক্লিক করে <strong>New Query</strong> খুলুন।</li>
+                      <li>নিচের কোডটি কপি করে পেস্ট করুন এবং ডানদিকের <strong>Run</strong> বোতামটি চাপুন:</li>
+                    </ol>
+                    <div class="relative bg-slate-950 p-3.5 rounded-lg border border-slate-800 font-mono text-[11px] text-rose-400/90 overflow-x-auto whitespace-pre">-- RLS সিকিউরিটি নিষ্ক্রিয় করুন যাতে ডাটা ট্রান্সফার হতে পারে
+ALTER TABLE members DISABLE ROW LEVEL SECURITY;
+ALTER TABLE activity_logs DISABLE ROW LEVEL SECURITY;
+ALTER TABLE badges DISABLE ROW LEVEL SECURITY;
+ALTER TABLE audit_trails DISABLE ROW LEVEL SECURITY;
+
+-- রিয়েল-টাইম লাইভ সিঙ্ক চালু করুন
+BEGIN;
+  DROP PUBLICATION IF EXISTS supabase_realtime;
+  CREATE PUBLICATION supabase_realtime;
+COMMIT;
+ALTER PUBLICATION supabase_realtime ADD TABLE members;
+ALTER PUBLICATION supabase_realtime ADD TABLE activity_logs;
+ALTER PUBLICATION supabase_realtime ADD TABLE badges;
+ALTER PUBLICATION supabase_realtime ADD TABLE audit_trails;</div>
+                    <p class="text-[10px] text-slate-400 italic">
+                      উপরোক্ত কোডটি রান করার সাথে সাথে আপনার ডাটাবেজ আনলক হয়ে যাবে এবং লাইভ ও রিয়েল-টাইম সিংক্রোনাইজেশন ১০০% কাজ করা শুরু করবে!
+                    </p>
+                  </div>
+                ` : `
                   <div class="p-3 bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs rounded-xl font-mono leading-relaxed max-h-32 overflow-y-auto">
                     <strong>কানেকশন ইরর:</strong> ${state.supabaseConnectionError}
                   </div>
-                ` : ''}
+                `) : ''}
               </div>
 
               <!-- Manual Sync Operations Box -->
