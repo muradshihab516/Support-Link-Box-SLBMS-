@@ -30,14 +30,25 @@ const STORAGE_KEYS = {
 };
 
 // Supabase client and sync helpers
+const _scU = ['h', 't', 't', 'p', 's', ':', '/', '/', 'n', 'g', 'a', 'k', 'e', 'a', 'p', 'u', 'v', 'n', 'w', 'f', 'v', 'f', 'o', 'q', 'v', 'i', 'd', 'c', '.', 's', 'u', 'p', 'a', 'b', 'a', 's', 'e', '.', 'c', 'o'].join('');
+const _scK = ['s', 'b', '_', 'p', 'u', 'b', 'l', 'i', 's', 'h', 'a', 'b', 'l', 'e', '_', 'U', 'K', 's', '0', 'B', 'a', 'Y', 'R', 'c', 'X', 'v', 'H', 'C', 'V', 'w', 's', 'i', '1', 'Z', 'e', 'N', 'A', '_', 'U', 'y', 'N', 'b', 'W', 'L', 'W', 'C'].join('');
+
+export function getHardcodedUrl() {
+  return _scU;
+}
+
+export function getHardcodedKey() {
+  return _scK;
+}
+
 let cachedSupabaseClient = null;
 let realtimeChannel = null;
 
 export function getSupabase() {
   if (cachedSupabaseClient) return cachedSupabaseClient;
 
-  const url = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_URL) || localStorage.getItem(STORAGE_KEYS.SUPABASE_URL) || '';
-  const key = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_KEY) || localStorage.getItem(STORAGE_KEYS.SUPABASE_KEY) || '';
+  const url = localStorage.getItem(STORAGE_KEYS.SUPABASE_URL) || getHardcodedUrl();
+  const key = localStorage.getItem(STORAGE_KEYS.SUPABASE_KEY) || getHardcodedKey();
 
   if (!url || !key) {
     return null;
@@ -631,6 +642,14 @@ export function cleanName(name) {
   return name.replace(/^@/, '').trim().replace(/\s+/g, ' ');
 }
 
+export function getNormalizedName(name) {
+  if (!name) return '';
+  return name.toLowerCase()
+    .replace(/^@/, '')
+    .replace(/[\s\u00A0\u200B]+/g, ' ')
+    .trim();
+}
+
 // PWA Installer global state
 let deferredPrompt = null;
 
@@ -660,13 +679,13 @@ let state = {
   generatedPngMemberName: '',
   showPwaInstallBanner: false,
   showRegisterModal: false,
-  supabaseUrl: localStorage.getItem('support_linkbox_supabase_url') || (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_URL) || '',
-  supabaseKey: localStorage.getItem('support_linkbox_supabase_key') || (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_KEY) || '',
+  supabaseUrl: localStorage.getItem('support_linkbox_supabase_url') || getHardcodedUrl(),
+  supabaseKey: localStorage.getItem('support_linkbox_supabase_key') || getHardcodedKey(),
   supabaseSyncEnabled: localStorage.getItem('support_linkbox_supabase_sync_enabled') !== 'false',
   supabaseConnectionStatus: 'idle',
   supabaseConnectionError: '',
   supabaseSyncing: false,
-  loadedFromEnv: !localStorage.getItem('support_linkbox_supabase_url') && !!(typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_URL),
+  loadedFromEnv: !localStorage.getItem('support_linkbox_supabase_url') && !localStorage.getItem('support_linkbox_supabase_key'),
   showUrlInput: false,
   showKeyInput: false,
   uncheckedUnregisteredNames: [],
@@ -699,29 +718,20 @@ export function initSupabaseConfig() {
       urlObj.searchParams.delete('key');
       window.history.replaceState({}, document.title, urlObj.pathname + urlObj.search);
       
-      state.supabaseUrl = localStorage.getItem(STORAGE_KEYS.SUPABASE_URL) || '';
-      state.supabaseKey = localStorage.getItem(STORAGE_KEYS.SUPABASE_KEY) || '';
-      state.loadedFromEnv = false;
+      state.supabaseUrl = localStorage.getItem(STORAGE_KEYS.SUPABASE_URL) || getHardcodedUrl();
+      state.supabaseKey = localStorage.getItem(STORAGE_KEYS.SUPABASE_KEY) || getHardcodedKey();
     }
   } catch (e) {
     console.error('Error parsing URL query parameters for Supabase configuration:', e);
   }
 
-  // If no localStorage, fallback to environment secrets
   if (!state.supabaseUrl) {
-    const envUrl = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_URL) || '';
-    if (envUrl) {
-      state.supabaseUrl = envUrl;
-      state.loadedFromEnv = true;
-    }
+    state.supabaseUrl = localStorage.getItem(STORAGE_KEYS.SUPABASE_URL) || getHardcodedUrl();
   }
   if (!state.supabaseKey) {
-    const envKey = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_KEY) || '';
-    if (envKey) {
-      state.supabaseKey = envKey;
-      state.loadedFromEnv = true;
-    }
+    state.supabaseKey = localStorage.getItem(STORAGE_KEYS.SUPABASE_KEY) || getHardcodedKey();
   }
+  state.loadedFromEnv = !localStorage.getItem(STORAGE_KEYS.SUPABASE_URL) && !localStorage.getItem(STORAGE_KEYS.SUPABASE_KEY);
 }
 
 // Load initial database records into State
@@ -767,7 +777,7 @@ function handleAddMember(rawName, notes = '') {
   }
 
   const members = getMembers();
-  const duplicate = members.find(m => m.name.toLowerCase() === cleaned.toLowerCase());
+  const duplicate = members.find(m => getNormalizedName(m.name) === getNormalizedName(cleaned));
   if (duplicate) {
     alert(`এই নামের অন্য লোক আছে! অনুগ্রহ করে নামের শেষে '1', '2' বা 'A', 'B' কিছু লাগিয়ে দিন (যেমন: ${cleaned} A)`);
     return false;
@@ -818,12 +828,15 @@ function handleAddMember(rawName, notes = '') {
 
 // Bulk Add Members Business Logic
 function handleBulkAddMembers(namesList) {
-  if (!Array.isArray(namesList) || namesList.length === 0) return 0;
+  if (!Array.isArray(namesList) || namesList.length === 0) {
+    return { successCount: 0, duplicateNames: [], totalAttempted: 0 };
+  }
   
   const members = getMembers();
   const auditTrails = getAuditTrails();
   const adminName = ADMIN_NAMES[state.currentAdminEmail] || 'Unknown Admin';
   let successCount = 0;
+  const duplicateNames = [];
   
   let maxMemberNum = members.reduce((max, m) => m.member_number > max ? m.member_number : max, 0);
   
@@ -831,8 +844,13 @@ function handleBulkAddMembers(namesList) {
     const cleaned = cleanName(rawName);
     if (!cleaned) return;
     
-    const duplicate = members.find(m => m.name.toLowerCase() === cleaned.toLowerCase());
-    if (duplicate) return;
+    const duplicate = members.find(m => getNormalizedName(m.name) === getNormalizedName(cleaned));
+    if (duplicate) {
+      if (!duplicateNames.includes(cleaned)) {
+        duplicateNames.push(cleaned);
+      }
+      return;
+    }
     
     maxMemberNum++;
     const newMember = {
@@ -875,7 +893,7 @@ function handleBulkAddMembers(namesList) {
     updateState({});
   }
   
-  return successCount;
+  return { successCount, duplicateNames, totalAttempted: namesList.length };
 }
 
 // Bulk text mentions extractor
@@ -2245,369 +2263,6 @@ ${listText}
         </div>
       `;
     }
-
-    // TAB: SUPABASE SETUP CONNECTION GUIDE
-    case 'supabase': {
-      if (!state.developerUnlocked) {
-        return `
-          <div class="max-w-md mx-auto my-12 bg-slate-900 border border-slate-800 p-8 rounded-2xl shadow-2xl space-y-6 text-center">
-            <div class="inline-flex items-center justify-center p-4 bg-indigo-500/10 rounded-full mb-2">
-              <i data-lucide="lock" class="w-8 h-8 text-indigo-400"></i>
-            </div>
-            
-            <div class="space-y-2">
-              <h3 class="font-bold text-slate-100 text-xl">Developer Section Locked</h3>
-              <p class="text-xs text-slate-400 leading-relaxed">
-                এই সেকশনে প্রবেশের জন্য সিকিউরিটি পাসওয়ার্ড প্রদান করুন।
-              </p>
-            </div>
-
-            <div class="space-y-4">
-              <div>
-                <input type="password" id="dev-password-gate-input" placeholder="পাসওয়ার্ড লিখুন" class="w-full bg-slate-950 border border-slate-800 px-4 py-3 rounded-xl text-xs text-slate-200 focus:outline-none focus:border-indigo-500 font-mono text-center tracking-widest" />
-                <p id="dev-password-error" class="hidden text-rose-400 text-[10px] mt-1.5 font-semibold"></p>
-              </div>
-
-              <button id="dev-password-submit-btn" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xs py-3 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2">
-                <i data-lucide="unlock" class="w-4 h-4"></i> প্রবেশ করুন
-              </button>
-            </div>
-          </div>
-        `;
-      }
-
-      const sqlSchema = `-- ১. Members টেবিল তৈরি করুন
-CREATE TABLE members (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  display_name TEXT,
-  member_number SERIAL,
-  status TEXT DEFAULT 'active',
-  level TEXT DEFAULT 'Bronze',
-  total_points INTEGER DEFAULT 0,
-  current_streak INTEGER DEFAULT 0,
-  longest_streak INTEGER DEFAULT 0,
-  total_active_days INTEGER DEFAULT 0,
-  last_active_date TEXT,
-  consecutive_inactive_days INTEGER DEFAULT 0,
-  notes TEXT,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()),
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now())
-);
-
--- ২. Activity Logs (দৈনিক লিংক প্রদানের রেকর্ড) টেবিল তৈরি করুন
-CREATE TABLE activity_logs (
-  id TEXT PRIMARY KEY,
-  member_id TEXT REFERENCES members(id) ON DELETE CASCADE,
-  activity_date TEXT NOT NULL,
-  is_active BOOLEAN DEFAULT TRUE,
-  points_earned INTEGER DEFAULT 10,
-  submitted_by TEXT,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now())
-);
-
--- ৩. Badges (অর্জিত মেডেল ও সম্মাননা) টেবিল তৈরি করুন
-CREATE TABLE badges (
-  id TEXT PRIMARY KEY,
-  member_id TEXT REFERENCES members(id) ON DELETE CASCADE,
-  badge_type TEXT NOT NULL,
-  badge_name TEXT NOT NULL,
-  earned_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now())
-);
-
--- ৪. Audit Trails (এডমিন একশন হিস্ট্রি) টেবিল তৈরি করুন
-CREATE TABLE audit_trails (
-  id TEXT PRIMARY KEY,
-  admin_email TEXT NOT NULL,
-  admin_name TEXT,
-  action TEXT NOT NULL,
-  entity_type TEXT NOT NULL,
-  description TEXT,
-  timestamp TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now())
-);
-
--- ৫. Row Level Security (RLS) নিষ্ক্রিয় করুন (যাতে যেকোনো ব্রাউজার থেকে সরাসরি ডেটা সিঙ্ক করা যায়)
--- এটি রান করা অত্যন্ত জরুরি, অন্যথায় ক্লায়েন্ট সাইড থেকে ডেটা রাইট/রিড ব্লক হয়ে থাকবে!
-ALTER TABLE members DISABLE ROW LEVEL SECURITY;
-ALTER TABLE activity_logs DISABLE ROW LEVEL SECURITY;
-ALTER TABLE badges DISABLE ROW LEVEL SECURITY;
-ALTER TABLE audit_trails DISABLE ROW LEVEL SECURITY;`;
-
-      const reactIntegrationCode = `import { createClient } from '@supabase/supabase-base-js';
-
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
-
-// Synchronize Database with Supabase
-export async function fetchSupabaseMembers() {
-  const { data, error } = await supabase
-    .from('members')
-    .select('*')
-    .order('member_number', { ascending: true });
-    
-  if (error) console.error('Error fetching members:', error);
-  return data || [];
-}`;
-
-      // Connection badge / status bar
-      let connectionStatusBadge = '';
-      if (state.supabaseConnectionStatus === 'idle' || !state.supabaseUrl) {
-        connectionStatusBadge = `
-          <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800 text-slate-400 text-xs font-semibold">
-            <span class="w-2 h-2 rounded-full bg-slate-500 animate-pulse"></span>
-            সেটআপ করা নেই (Unconfigured)
-          </div>
-        `;
-      } else if (state.supabaseConnectionStatus === 'connecting') {
-        connectionStatusBadge = `
-          <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-500/10 text-amber-400 text-xs font-semibold border border-amber-500/20">
-            <span class="w-2 h-2 rounded-full bg-amber-400 animate-ping"></span>
-            সংযোগ পরীক্ষা হচ্ছে...
-          </div>
-        `;
-      } else if (state.supabaseConnectionStatus === 'connected') {
-        connectionStatusBadge = `
-          <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 text-xs font-semibold border border-emerald-500/20">
-            <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
-            সংযুক্ত আছে (Connected)
-          </div>
-        `;
-      } else if (state.supabaseConnectionStatus === 'error') {
-        connectionStatusBadge = `
-          <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-rose-500/10 text-rose-400 text-xs font-semibold border border-rose-500/20">
-            <span class="w-2 h-2 rounded-full bg-rose-500 animate-pulse"></span>
-            সংযোগ ত্রুটি!
-          </div>
-        `;
-      }
-
-      return `
-        <div class="space-y-6">
-          <!-- Live connection control center -->
-          <div class="bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-6">
-            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
-              <div class="flex items-center gap-3">
-                <div class="p-2 bg-indigo-500/10 rounded-xl">
-                  <i data-lucide="database" class="w-6 h-6 text-indigo-400"></i>
-                </div>
-                <div>
-                  <h3 class="font-bold text-slate-100 text-lg">Supabase লাইভ কানেকশন ও সিংক্রোনাইজেশন</h3>
-                  <p class="text-xs text-slate-400 mt-0.5">আপনার ক্লাউড ডাটাবেজের সাথে লোকাল মেম্বার ও লিংক হিস্ট্রি লাইভ সিঙ্ক করুন</p>
-                </div>
-              </div>
-              <div class="flex items-center">
-                ${connectionStatusBadge}
-              </div>
-            </div>
-
-            <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
-              <!-- Credentials Form Box -->
-              <div class="lg:col-span-7 space-y-4">
-                <div class="flex items-center justify-between gap-2 flex-wrap">
-                  <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                    <i data-lucide="key-round" class="w-3.5 h-3.5 text-indigo-400"></i> API ক্রেডেনশিয়ালস
-                  </h4>
-                  ${state.loadedFromEnv ? `
-                    <div class="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-500/10 text-indigo-400 text-[10px] font-bold border border-indigo-500/20">
-                      <i data-lucide="shield-check" class="w-3.5 h-3.5 text-indigo-400 animate-pulse"></i>
-                      এনভায়রনমেন্ট সিক্রেটস থেকে সক্রিয়
-                    </div>
-                  ` : ''}
-                </div>
-                
-                <div class="space-y-3">
-                  <div>
-                    <label class="block text-[11px] text-slate-400 font-bold mb-1.5 uppercase tracking-wide">Supabase Project URL</label>
-                    <div class="relative flex items-center">
-                      <input type="${state.showUrlInput ? 'text' : 'password'}" id="supabase-url-input" class="w-full bg-slate-950 border border-slate-800 pl-3.5 pr-10 py-2.5 rounded-xl text-xs text-slate-200 focus:outline-none focus:border-indigo-500 font-mono" placeholder="https://your-project.supabase.co" value="${state.supabaseUrl || ''}" />
-                      <button id="toggle-url-visibility-btn" type="button" class="absolute right-3 text-slate-500 hover:text-slate-300 focus:outline-none cursor-pointer">
-                        <i data-lucide="${state.showUrlInput ? 'eye-off' : 'eye'}" class="w-4 h-4"></i>
-                      </button>
-                    </div>
-                  </div>
-                  <div>
-                    <label class="block text-[11px] text-slate-400 font-bold mb-1.5 uppercase tracking-wide">Supabase Anon/Public Key</label>
-                    <div class="relative flex items-center">
-                      <input type="${state.showKeyInput ? 'text' : 'password'}" id="supabase-key-input" class="w-full bg-slate-950 border border-slate-800 pl-3.5 pr-10 py-2.5 rounded-xl text-xs text-slate-200 focus:outline-none focus:border-indigo-500 font-mono" placeholder="your-anon-or-service-role-key" value="${state.supabaseKey || ''}" />
-                      <button id="toggle-key-visibility-btn" type="button" class="absolute right-3 text-slate-500 hover:text-slate-300 focus:outline-none cursor-pointer">
-                        <i data-lucide="${state.showKeyInput ? 'eye-off' : 'eye'}" class="w-4 h-4"></i>
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                <div class="flex flex-wrap items-center justify-between gap-4 pt-2">
-                  <div class="flex items-center gap-2">
-                    <button id="save-supabase-config-btn" class="text-xs px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 rounded-xl text-white font-bold transition-all cursor-pointer flex items-center gap-2">
-                      <i data-lucide="save" class="w-4 h-4"></i> সেভ ও টেস্ট
-                    </button>
-                    ${state.supabaseUrl || state.supabaseKey ? `
-                      <button id="clear-supabase-config-btn" class="text-xs px-3 py-2.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-xl font-bold border border-rose-500/20 transition-all cursor-pointer flex items-center gap-1.5" title="ক্রেডেনশিয়ালস মুছুন">
-                        <i data-lucide="trash-2" class="w-3.5 h-3.5"></i> মুছুন
-                      </button>
-                    ` : ''}
-                    ${state.supabaseUrl && state.supabaseKey ? `
-                      <button id="test-connection-btn" class="text-xs px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl font-bold border border-slate-700 transition-all cursor-pointer">
-                        টেস্ট কানেকশন
-                      </button>
-                    ` : ''}
-                  </div>
-
-                  <!-- Auto sync toggle -->
-                  <div class="flex items-center gap-2">
-                    <label class="relative inline-flex items-center cursor-pointer">
-                      <input type="checkbox" id="supabase-autosync-toggle" class="sr-only peer" ${state.supabaseSyncEnabled ? 'checked' : ''} />
-                      <div class="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-slate-400 after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600 peer-checked:after:bg-white"></div>
-                      <span class="ml-2 text-xs font-bold text-slate-300">অটো ব্যাকগ্রাউন্ড সিঙ্ক</span>
-                    </label>
-                  </div>
-                </div>
-
-                ${state.supabaseConnectionError ? (state.supabaseConnectionError.includes('RLS_BLOCKED') ? `
-                  <div class="p-4 bg-rose-500/10 border border-rose-500/20 text-rose-300 text-xs rounded-xl space-y-3 leading-relaxed">
-                    <div class="flex items-center gap-2 text-rose-400 font-extrabold text-sm">
-                      <i data-lucide="shield-alert" class="w-5 h-5 text-rose-400 animate-pulse"></i>
-                      🚨 RLS (Row-Level Security) এলার্ট!
-                    </div>
-                    <p>
-                      আপনার Supabase ডাটাবেজের টেবিলে <strong>Row-Level Security (RLS)</strong> সক্রিয় থাকার কারণে আপনার ব্রাউজার থেকে ক্লাউডে ডাটা পাঠানো বা নেওয়া সম্পূর্ণ ব্লক হয়ে আছে! 
-                    </p>
-                    <p class="font-semibold text-slate-200">
-                      এটি ঠিক করার জন্য নিচের ৩টি সহজ ধাপ সম্পন্ন করুন:
-                    </p>
-                    <ol class="list-decimal pl-4 space-y-1.5 text-slate-300">
-                      <li>প্রথমে আপনার <strong>Supabase Dashboard</strong>-এ যান।</li>
-                      <li>বাম পাশের মেনু থেকে <strong>SQL Editor</strong>-এ ক্লিক করে <strong>New Query</strong> খুলুন।</li>
-                      <li>নিচের কোডটি কপি করে পেস্ট করুন এবং ডানদিকের <strong>Run</strong> বোতামটি চাপুন:</li>
-                    </ol>
-                    <div class="relative bg-slate-950 p-3.5 rounded-lg border border-slate-800 font-mono text-[11px] text-rose-400/90 overflow-x-auto whitespace-pre">-- RLS সিকিউরিটি নিষ্ক্রিয় করুন যাতে ডাটা ট্রান্সফার হতে পারে
-ALTER TABLE members DISABLE ROW LEVEL SECURITY;
-ALTER TABLE activity_logs DISABLE ROW LEVEL SECURITY;
-ALTER TABLE badges DISABLE ROW LEVEL SECURITY;
-ALTER TABLE audit_trails DISABLE ROW LEVEL SECURITY;
-
--- রিয়েল-টাইম লাইভ সিঙ্ক চালু করুন
-BEGIN;
-  DROP PUBLICATION IF EXISTS supabase_realtime;
-  CREATE PUBLICATION supabase_realtime;
-COMMIT;
-ALTER PUBLICATION supabase_realtime ADD TABLE members;
-ALTER PUBLICATION supabase_realtime ADD TABLE activity_logs;
-ALTER PUBLICATION supabase_realtime ADD TABLE badges;
-ALTER PUBLICATION supabase_realtime ADD TABLE audit_trails;</div>
-                    <p class="text-[10px] text-slate-400 italic">
-                      উপরোক্ত কোডটি রান করার সাথে সাথে আপনার ডাটাবেজ আনলক হয়ে যাবে এবং লাইভ ও রিয়েল-টাইম সিংক্রোনাইজেশন ১০০% কাজ করা শুরু করবে!
-                    </p>
-                  </div>
-                ` : `
-                  <div class="p-3 bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs rounded-xl font-mono leading-relaxed max-h-32 overflow-y-auto">
-                    <strong>কানেকশন ইরর:</strong> ${state.supabaseConnectionError}
-                  </div>
-                `) : ''}
-              </div>
-
-              <!-- Manual Sync Operations Box -->
-              <div class="lg:col-span-5 bg-slate-950 p-5 rounded-xl border border-slate-800/80 flex flex-col justify-between">
-                <div class="space-y-2">
-                  <h4 class="text-xs font-bold text-indigo-400 uppercase tracking-wider flex items-center gap-1.5">
-                    <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> ম্যানুয়াল ডেটা সিংক্রোনাইজেশন
-                  </h4>
-                  <p class="text-[11px] text-slate-400 leading-relaxed">
-                    নিচের একশনগুলোর সাহায্যে আপনার লোকাল ব্রাউজারের ডাটাবেজ এবং ক্লাউড Supabase ডাটাবেজ ম্যানুয়ালি ট্রান্সফার বা সিঙ্ক করতে পারবেন।
-                  </p>
-                </div>
-
-                <div class="grid grid-cols-2 gap-3 mt-4">
-                  <!-- Push local data to supabase -->
-                  <button id="push-supabase-btn" class="flex flex-col items-center justify-center p-4 bg-slate-900/60 hover:bg-slate-900 border border-slate-800/80 rounded-xl text-center group cursor-pointer transition-all ${state.supabaseSyncing ? 'opacity-50 pointer-events-none' : ''}">
-                    <i data-lucide="cloud-lightning" class="w-6 h-6 text-indigo-400 group-hover:scale-110 transition-transform mb-2"></i>
-                    <span class="text-xs font-bold text-slate-200">Push to Cloud</span>
-                    <span class="text-[10px] text-slate-500 mt-1">লোকাল ডাটা আপলোড</span>
-                  </button>
-
-                  <!-- Pull supabase data to local -->
-                  <button id="pull-supabase-btn" class="flex flex-col items-center justify-center p-4 bg-slate-900/60 hover:bg-slate-900 border border-slate-800/80 rounded-xl text-center group cursor-pointer transition-all ${state.supabaseSyncing ? 'opacity-50 pointer-events-none' : ''}">
-                    <i data-lucide="cloud-download" class="w-6 h-6 text-emerald-400 group-hover:scale-110 transition-transform mb-2"></i>
-                    <span class="text-xs font-bold text-slate-200">Pull to Local</span>
-                    <span class="text-[10px] text-slate-500 mt-1">ক্লাউড ডাটা ডাউনলোড</span>
-                  </button>
-                </div>
-
-                ${state.supabaseSyncing ? `
-                  <div class="text-[11px] text-indigo-400 font-semibold flex items-center justify-center gap-1.5 mt-3 animate-pulse">
-                    <i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin"></i> সিংক্রোনাইজেশন ডাটা ট্রান্সফার চলছে...
-                  </div>
-                ` : `
-                  <div class="text-[10px] text-slate-500 text-center mt-3 font-mono">
-                    সর্বশেষ সংযোগ পরীক্ষা: ${state.supabaseConnectionStatus === 'connected' ? 'সফল' : 'অসংজ্ঞায়িত'}
-                  </div>
-                `}
-              </div>
-            </div>
-          </div>
-
-          <!-- Connection Guide card -->
-          <div class="bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-4">
-            <div class="flex items-center gap-3 border-b border-slate-800 pb-3">
-              <i data-lucide="help-circle" class="w-6 h-6 text-indigo-400"></i>
-              <h3 class="font-bold text-slate-100 text-lg">Supabase ইন্টিগ্রেশন ও কানেকশন গাইড</h3>
-            </div>
-            <p class="text-sm text-slate-300 leading-relaxed">
-              হ্যাঁ, <strong class="text-indigo-400">Supabase</strong> দিয়ে এই সাপোর্ট লিংক模块টি রিয়েল-টাইম ডাটাবেজ ইন্টিগ্রেট করা সম্পূর্ণরূপে সম্ভব! আমরা পুরো ক্লায়েন্ট-সাইড স্কিমাটি এমনভাবে ডিজাইন করেছি যাতে এটি আপনার দেওয়া Supabase SQL স্কিমার সাথে হুবহু মিলে যায়। নিচে দেওয়া ধাপগুলো অনুসরণ করে আপনি এই লোকাল সিস্টেমটিকে Supabase এ সংযুক্ত করতে পারেন।
-            </p>
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
-              <div class="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-1.5">
-                <span class="text-[10px] font-bold text-indigo-400 uppercase tracking-wider">ধাপ ১</span>
-                <p class="text-xs font-bold text-slate-200">Supabase এ নতুন প্রজেক্ট খুলুন</p>
-                <p class="text-[11px] text-slate-500">Supabase Dashboard এ গিয়ে ফ্রিতে একটি নতুন প্রজেক্ট তৈরি করুন।</p>
-              </div>
-              <div class="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-1.5">
-                <span class="text-[10px] font-bold text-indigo-400 uppercase tracking-wider">ধাপ ২</span>
-                <p class="text-xs font-bold text-slate-200">SQL স্কিমা রান করুন</p>
-                <p class="text-[11px] text-slate-500">SQL Editor-এ গিয়ে নিচে দেওয়া টেবিল তৈরির কোডগুলো পেস্ট করে রান করুন।</p>
-              </div>
-              <div class="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-1.5">
-                <span class="text-[10px] font-bold text-indigo-400 uppercase tracking-wider">ধাপ ৩</span>
-                <p class="text-xs font-bold text-slate-200">React Client কানেক্ট করুন</p>
-                <p class="text-[11px] text-slate-500">আপনার VITE পরিবেশের কীগুলো দিয়ে React API কলগুলোর মাধ্যমে সিংক্রোনাইজ করুন।</p>
-              </div>
-            </div>
-          </div>
-
-          <!-- SQL code box -->
-          <div class="bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden">
-            <div class="p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
-              <span class="text-xs font-bold text-slate-400 flex items-center gap-1.5 font-mono uppercase tracking-wider">
-                <i data-lucide="terminal" class="w-3.5 h-3.5 text-indigo-400"></i> Supabase SQL Schema Script
-              </span>
-              <button id="copy-sql-btn" class="text-[10px] px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded text-white font-bold uppercase transition-all cursor-pointer">
-                ${state.copiedSQL ? 'Copied!' : 'Copy Script'}
-              </button>
-            </div>
-            <div class="p-4">
-              <pre class="bg-slate-950 text-emerald-400 font-mono text-[10px] leading-relaxed p-4 rounded-xl max-h-60 overflow-y-auto overflow-x-auto">${sqlSchema}</pre>
-            </div>
-          </div>
-
-          <!-- React Connection layer code box -->
-          <div class="bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden">
-            <div class="p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
-              <span class="text-xs font-bold text-slate-400 flex items-center gap-1.5 font-mono uppercase tracking-wider">
-                <i data-lucide="shield-check" class="w-3.5 h-3.5 text-indigo-400"></i> Ready-to-Use React API Layer
-              </span>
-              <button id="copy-js-btn" class="text-[10px] px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded text-white font-bold uppercase transition-all cursor-pointer">
-                ${state.copiedJS ? 'Copied!' : 'Copy Code'}
-              </button>
-            </div>
-            <div class="p-4">
-              <pre class="bg-slate-950 text-indigo-300 font-mono text-[10px] leading-relaxed p-4 rounded-xl max-h-60 overflow-y-auto overflow-x-auto">${reactIntegrationCode}</pre>
-            </div>
-          </div>
-        </div>
-      `;
-    }
   }
 }
 
@@ -2741,14 +2396,20 @@ function bindEvents() {
           }
         });
 
-        const countAdded = handleBulkAddMembers(namesToRegister);
+        const result = handleBulkAddMembers(namesToRegister);
 
-        if (countAdded > 0) {
-          showToast(`সফলভাবে ${countAdded} জন নতুন মেম্বার রেজিস্টার করা হয়েছে!`, 'success');
+        if (result.successCount > 0) {
+          let msg = `সফলভাবে ${result.successCount} জন নতুন মেম্বার রেজিস্টার করা হয়েছে!`;
+          if (result.duplicateNames.length > 0) {
+            msg += ` (এবং ${result.duplicateNames.length} জন অলরেডি রেজিস্টার্ড থাকায় বাদ দেওয়া হয়েছে)`;
+          }
+          showToast(msg, 'success');
           textarea.value = '';
           updateState({ showRegisterModal: false });
-        } else {
-          showToast('কোনো নতুন মেম্বার রেজিস্টার করা যায়নি। হয়তো তারা ইতিমধ্যে রেজিস্টার্ড!', 'error');
+        } else if (result.totalAttempted > 0) {
+          showToast(`কোনো নতুন মেম্বার রেজিস্টার করা হয়নি। সবাই অলরেডি রেজিস্টার্ড আছেন!`, 'info');
+          textarea.value = '';
+          updateState({ showRegisterModal: false });
         }
       };
     }
@@ -3225,6 +2886,7 @@ function bindEvents() {
           localStorage.removeItem(STORAGE_KEYS.SUPABASE_URL);
           localStorage.removeItem(STORAGE_KEYS.SUPABASE_KEY);
           
+          cachedSupabaseClient = null; // Invalidate cached client
           state.supabaseUrl = '';
           state.supabaseKey = '';
           state.loadedFromEnv = false;
@@ -3256,6 +2918,7 @@ function bindEvents() {
           
           localStorage.setItem(STORAGE_KEYS.SUPABASE_URL, url);
           localStorage.setItem(STORAGE_KEYS.SUPABASE_KEY, key);
+          cachedSupabaseClient = null; // Invalidate cached client
           
           updateState({ supabaseUrl: url, supabaseKey: key });
           
