@@ -3443,11 +3443,17 @@ function bindEvents() {
       updateState({ isDownloadingReport: true });
 
       setTimeout(() => {
-        const html2canvasFn = window.html2canvas || html2canvas;
+        const html2canvasFn = window.html2canvas || (typeof html2canvas !== 'undefined' ? html2canvas : null);
+        if (!html2canvasFn) {
+          showToast('ডাউনলোড ব্যর্থ: html2canvas লাইব্রেরি লোড হয়নি। দয়া করে পেজটি রিলোড দিন।', 'error');
+          updateState({ isDownloadingReport: false });
+          return;
+        }
+
         html2canvasFn(reportCard, {
           scale: 2, // high crisp definitions
           backgroundColor: '#020617', // deep dark theme
-          logging: false,
+          logging: true, // enable logging for diagnosing
           useCORS: true,
           allowTaint: false // allowTaint MUST be false to avoid SecurityError during .toDataURL()
         }).then(canvas => {
@@ -3476,7 +3482,8 @@ function bindEvents() {
           });
         }).catch(err => {
           console.error('Canvas image generation failed:', err);
-          showToast('রিপোর্ট ইমেজ ডাউনলোড ব্যর্থ হয়েছে! দয়া করে আবার চেষ্টা করুন।', 'error');
+          const errText = err && err.message ? err.message : String(err);
+          showToast(`ডাউনলোড ব্যর্থ হয়েছে: ${errText}`, 'error');
           updateState({ isDownloadingReport: false });
         });
       }, 400);
