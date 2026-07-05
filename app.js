@@ -3443,36 +3443,14 @@ function bindEvents() {
       updateState({ isDownloadingReport: true });
 
       setTimeout(() => {
-        // Safe cross-origin stylesheet bypass for sandboxed iframe compatibility
-        const disabledSheets = [];
-        const sheets = Array.from(document.styleSheets);
-        for (let i = 0; i < sheets.length; i++) {
-          try {
-            // Test if we can read cssRules. If it throws, we disable it.
-            const rules = sheets[i].cssRules;
-          } catch (e) {
-            if (sheets[i].ownerNode) {
-              sheets[i].ownerNode.disabled = true;
-              disabledSheets.push(sheets[i].ownerNode);
-            }
-          }
-        }
-
-        const restoreSheets = () => {
-          disabledSheets.forEach(node => {
-            node.disabled = false;
-          });
-        };
-
         const html2canvasFn = window.html2canvas || html2canvas;
         html2canvasFn(reportCard, {
           scale: 2, // high crisp definitions
           backgroundColor: '#020617', // deep dark theme
           logging: false,
           useCORS: true,
-          allowTaint: true // ensures rendering is never blocked on CORS resources
+          allowTaint: false // allowTaint MUST be false to avoid SecurityError during .toDataURL()
         }).then(canvas => {
-          restoreSheets();
           const imgData = canvas.toDataURL('image/png');
           const blob = dataURLtoBlob(imgData);
           const blobUrl = blob ? URL.createObjectURL(blob) : imgData;
@@ -3497,9 +3475,8 @@ function bindEvents() {
             generatedPngMemberName: selectedMember.name
           });
         }).catch(err => {
-          restoreSheets();
           console.error('Canvas image generation failed:', err);
-          showToast('রিপোর্ট ইমেজ ডাউনলোড ব্যর্থ হয়েছে!', 'error');
+          showToast('রিপোর্ট ইমেজ ডাউনলোড ব্যর্থ হয়েছে! দয়া করে আবার চেষ্টা করুন।', 'error');
           updateState({ isDownloadingReport: false });
         });
       }, 400);
