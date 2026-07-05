@@ -200,7 +200,9 @@ export async function testSupabaseConnection() {
   } catch (err) {
     console.error('Supabase Connection Test Error:', err);
     let friendlyError = err.message || 'Connection failed';
-    if (friendlyError.includes('RLS_BLOCKED') || friendlyError.includes('row-level security')) {
+    if (err instanceof TypeError || friendlyError.includes('Failed to fetch') || friendlyError.includes('fetch')) {
+      friendlyError = 'নেটওয়ার্ক সংযোগ ব্যর্থ হয়েছে! আপনার ইন্টারনেট অথবা প্রোভাইড করা Supabase URL ও Key সঠিক আছে কিনা চেক করুন।';
+    } else if (friendlyError.includes('RLS_BLOCKED') || friendlyError.includes('row-level security')) {
       friendlyError = 'RLS_BLOCKED: Row-Level Security is active! RLS-এর কারণে ডাটা আপলোড ব্লক হয়ে আছে।';
     }
     updateState({ 
@@ -267,12 +269,18 @@ export async function performSmartSync(silent = true) {
   updateState({ supabaseSyncing: true });
   try {
     // 1. Fetch remote tables in parallel
-    const [remoteM, remoteL, remoteB, remoteA] = await Promise.all([
-      client.from('members').select('*'),
-      client.from('activity_logs').select('*'),
-      client.from('badges').select('*'),
-      client.from('audit_trails').select('*')
-    ]);
+    let remoteM, remoteL, remoteB, remoteA;
+    try {
+      [remoteM, remoteL, remoteB, remoteA] = await Promise.all([
+        client.from('members').select('*'),
+        client.from('activity_logs').select('*'),
+        client.from('badges').select('*'),
+        client.from('audit_trails').select('*')
+      ]);
+    } catch (fetchErr) {
+      console.error("Network fetch to Supabase failed:", fetchErr);
+      throw new Error(`সার্ভারের সাথে সংযোগ ব্যর্থ হয়েছে! আপনার ইন্টারনেট কানেকশন অথবা প্রোভাইড করা Supabase URL ও Key সঠিক আছে কিনা যাচাই করুন।`);
+    }
 
     // Check for any errors (e.g. RLS blocks)
     if (remoteM.error) throw new Error(`Members: ${remoteM.error.message}`);
@@ -452,13 +460,17 @@ export async function performSmartSync(silent = true) {
     return true;
   } catch (err) {
     console.error('Smart sync failed:', err);
+    let friendlyError = err.message || 'Synchronization failed';
+    if (err instanceof TypeError || friendlyError.includes('Failed to fetch') || friendlyError.includes('fetch')) {
+      friendlyError = 'সার্ভারের সাথে সংযোগ ব্যর্থ হয়েছে! আপনার ইন্টারনেট অথবা প্রোভাইড করা Supabase URL ও Key সঠিক আছে কিনা যাচাই করুন।';
+    }
     updateState({ 
       supabaseSyncing: false, 
       supabaseConnectionStatus: 'error', 
-      supabaseConnectionError: err.message || 'Synchronization failed' 
+      supabaseConnectionError: friendlyError 
     });
     if (!silent) {
-      showToast(`ডাটা সিঙ্ক করতে সমস্যা হয়েছে: ${err.message}`, 'error');
+      showToast(`ডাটা সিঙ্ক করতে সমস্যা হয়েছে: ${friendlyError}`, 'error');
     }
     return false;
   }
@@ -713,6 +725,62 @@ export function getNormalizedName(name) {
     .replace(/^@/, '')
     .replace(/[\s\u00A0\u200B\u200C\u200D\u200E\u200F\uFEFF]+/g, '')
     .trim();
+}
+
+// Extract date in YYYY-MM-DD from raw text
+export function detectDateFromText(text) {
+  if (!text) return null;
+  const dateRegex = /(?:📅|তারিখ|tarikh)?\s*(?::|\s)\s*([0-3]?\d)[-\/\.]([0-1]?\d)[-\/\.](20\d{2}|\d{2})\b/i;
+  const match = text.match(dateRegex);
+  if (match) {
+    let d = parseInt(match[1], 10);
+    let m = parseInt(match[2], 10);
+    let y = parseInt(match[3], 10);
+    if (d > 0 && d <= 31 && m > 0 && m <= 12) {
+      if (y < 100) y = 2000 + y;
+      const paddedD = String(d).padStart(2, '0');
+      const paddedM = String(m).padStart(2, '0');
+      return `${y}-${paddedM}-${paddedD}`;
+    }
+  }
+
+  const simpleDateRegex = /\b([0-3]?\d)[-\/\.]([0-1]?\d)[-\/\.](20\d{2}|\d{2})\b/;
+  const simpleMatch = text.match(simpleDateRegex);
+  if (simpleMatch) {
+    let d = parseInt(simpleMatch[1], 10);
+    let m = parseInt(simpleMatch[2], 10);
+    let y = parseInt(simpleMatch[3], 10);
+    if (d > 0 && d <= 31 && m > 0 && m <= 12) {
+      if (y < 100) y = 2000 + y;
+      const paddedD = String(d).padStart(2, '0');
+      const paddedM = String(m).padStart(2, '0');
+      return `${y}-${paddedM}-${paddedD}`;
+    }
+  }
+  return null;
+}
+
+// Safely compute yesterday's date string in YYYY-MM-DD format (timezone-proof)
+export function getYesterdayDateStr(dateStr) {
+  const parts = dateStr.split('-');
+  const y = parseInt(parts[0], 10);
+  const m = parseInt(parts[1], 10) - 1;
+  const d = parseInt(parts[2], 10);
+  const dateObj = new Date(y, m, d - 1);
+  const ry = dateObj.getFullYear();
+  const rm = String(dateObj.getMonth() + 1).padStart(2, '0');
+  const rd = String(dateObj.getDate()).padStart(2, '0');
+  return `${ry}-${rm}-${rd}`;
+}
+
+// Safely compute day difference between two YYYY-MM-DD strings (timezone-proof)
+export function getDiffDays(dateStr1, dateStr2) {
+  const p1 = dateStr1.split('-').map(Number);
+  const p2 = dateStr2.split('-').map(Number);
+  const d1 = new Date(p1[0], p1[1] - 1, p1[2]);
+  const d2 = new Date(p2[0], p2[1] - 1, p2[2]);
+  const diffTime = Math.abs(d1.getTime() - d2.getTime());
+  return Math.round(diffTime / (1000 * 60 * 60 * 24));
 }
 
 export function dataURLtoBlob(dataurl) {
@@ -1182,14 +1250,19 @@ function parseBulkActivityText(text) {
 function submitBulkActivity(dateStr, activeMemberIds) {
   const members = getMembers();
   const logs = getActivityLogs();
+  
+  // Prevent duplicate submissions on the same date
+  const duplicateLog = logs.find(l => l.activity_date === dateStr && l.is_active);
+  if (duplicateLog) {
+    showAlert(`এই তারিখে (${dateStr}) ইতিমধ্যে এক্টিভিটি লিস্ট সাবমিট করা হয়েছে! একই তারিখে একাধিক লিস্ট সাবমিট করা যাবে না।`, 'ডুপ্লিকেট তারিখ');
+    return;
+  }
+
   const badges = getBadges();
   const auditTrails = getAuditTrails();
   const adminName = ADMIN_NAMES[state.currentAdminEmail] || 'Unknown Admin';
 
-  const submissionDate = new Date(dateStr);
-  const yesterdayDate = new Date(submissionDate);
-  yesterdayDate.setDate(yesterdayDate.getDate() - 1);
-  const yesterdayStr = yesterdayDate.toISOString().split('T')[0];
+  const yesterdayStr = getYesterdayDateStr(dateStr);
 
   let loggedCount = 0;
 
@@ -1260,10 +1333,7 @@ function submitBulkActivity(dateStr, activeMemberIds) {
     } else {
       let inactiveDays = member.consecutive_inactive_days;
       if (member.last_active_date) {
-        const lastActive = new Date(member.last_active_date);
-        const diffTime = Math.abs(submissionDate.getTime() - lastActive.getTime());
-        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-        inactiveDays = diffDays;
+        inactiveDays = getDiffDays(dateStr, member.last_active_date);
       } else {
         inactiveDays += 1;
       }
@@ -1729,9 +1799,12 @@ function renderTabContent(totalCount, activeCount, inactiveCount, diamondCount) 
     case 'members': {
       // Search and Filter records
       const filtered = state.members.filter(m => {
-        const matchesQuery = m.name.toLowerCase().includes(state.searchQueryMembers.toLowerCase()) || 
-                             m.display_name.toLowerCase().includes(state.searchQueryMembers.toLowerCase()) || 
-                             m.member_number.toString() === state.searchQueryMembers;
+        const queryCleaned = state.searchQueryMembers.trim().toLowerCase().replace(/^#/, '');
+        const matchesQuery = !state.searchQueryMembers ? true : (
+          m.name.toLowerCase().includes(state.searchQueryMembers.toLowerCase()) || 
+          (m.display_name && m.display_name.toLowerCase().includes(state.searchQueryMembers.toLowerCase())) || 
+          m.member_number.toString().includes(queryCleaned)
+        );
         
         if (state.memberFilterStatus === 'all') return matchesQuery;
         if (state.memberFilterStatus === 'active') return matchesQuery && m.status === 'active';
@@ -2501,11 +2574,14 @@ ${listText}
 
     // TAB: MEMBER STATS REPORT GENERATOR
     case 'reports': {
-      const filteredForReports = state.members.filter(m => 
-        m.name.toLowerCase().includes(state.reportSearchQuery.toLowerCase()) || 
-        m.display_name.toLowerCase().includes(state.reportSearchQuery.toLowerCase()) ||
-        m.member_number.toString() === state.reportSearchQuery
-      );
+      const filteredForReports = state.members.filter(m => {
+        const queryCleaned = state.reportSearchQuery.trim().toLowerCase().replace(/^#/, '');
+        return !state.reportSearchQuery ? true : (
+          m.name.toLowerCase().includes(state.reportSearchQuery.toLowerCase()) || 
+          (m.display_name && m.display_name.toLowerCase().includes(state.reportSearchQuery.toLowerCase())) ||
+          m.member_number.toString().includes(queryCleaned)
+        );
+      });
 
       const selectedMember = state.members.find(m => m.id === state.reportSelectedMemberId);
       const allBadges = getBadges().filter(b => b.member_id === state.reportSelectedMemberId);
@@ -2517,8 +2593,8 @@ ${listText}
         <div id="stats-report-section" class="space-y-6">
           <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
             
-            <!-- Left Side: Member Selector list panel -->
-            <div class="lg:col-span-4 bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-xl flex flex-col space-y-4">
+            <!-- Left Side: Member Selector list panel (rendered below on mobile) -->
+            <div class="lg:col-span-4 order-2 lg:order-1 bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-xl flex flex-col space-y-4">
               <div class="border-b border-slate-800 pb-2">
                 <h3 class="font-bold text-slate-100 text-sm tracking-wide uppercase">Select Group Member</h3>
                 <p class="text-[11px] text-slate-400 mt-1">Select a member to generate, view, and download their custom report card.</p>
@@ -2552,10 +2628,27 @@ ${listText}
               </div>
             </div>
 
-            <!-- Right Side: Certificate Card Frame -->
-            <div class="lg:col-span-8 flex flex-col space-y-4">
+            <!-- Right Side: Certificate Card Frame (rendered above on mobile) -->
+            <div class="lg:col-span-8 order-1 lg:order-2 flex flex-col space-y-4">
               ${selectedMember ? `
                 <div class="space-y-4">
+                  <!-- Quick Premium Action Header for Instant Visibility -->
+                  <div class="bg-gradient-to-r from-indigo-950 via-slate-900 to-indigo-950 border border-indigo-500/30 p-4 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-3 shadow-lg">
+                    <div class="flex items-center gap-3">
+                      <div class="bg-indigo-600/10 p-2 rounded-xl border border-indigo-500/20 text-indigo-400">
+                        <i data-lucide="award" class="w-5 h-5"></i>
+                      </div>
+                      <div>
+                        <h4 class="text-xs font-bold text-slate-100">${selectedMember.name} এর পারফরম্যান্স কার্ড</h4>
+                        <p class="text-[10px] text-slate-400">পারফরম্যান্স রিপোর্ট ডাউনলোড করতে পাশের বাটনে ক্লিক করুন</p>
+                      </div>
+                    </div>
+                    <button id="download-report-png-top" class="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow-[0_4px_12px_rgba(79,70,229,0.3)] transition-all flex items-center justify-center gap-1.5 cursor-pointer w-full sm:w-auto" ${state.isDownloadingReport ? 'disabled' : ''}>
+                      <i data-lucide="download" class="w-3.5 h-3.5"></i>
+                      ${state.isDownloadingReport ? 'Downloading Image...' : 'Save PNG (ডাউনলোড করুন)'}
+                    </button>
+                  </div>
+
                   <!-- Printable report card block -->
                   <div id="printable-report-card" class="bg-slate-950 border border-slate-800 rounded-2xl p-6 md:p-8 shadow-2xl relative overflow-hidden space-y-6">
                     <div data-html2canvas-ignore="true" class="absolute right-0 top-0 w-64 h-64 bg-indigo-500/5 rounded-full blur-3xl -z-10 pointer-events-none"></div>
@@ -3088,15 +3181,27 @@ function bindEvents() {
     if (textarea) {
       textarea.oninput = (e) => {
         const text = e.target.value;
-        updateState({ 
+        const start = e.target.selectionStart;
+        const end = e.target.selectionEnd;
+
+        // Auto detect date from raw list
+        const detectedDate = detectDateFromText(text);
+
+        const nextState = { 
           bulkInputText: text,
           uncheckedUnregisteredNames: []
-        });
+        };
+
+        if (detectedDate) {
+          nextState.bulkInputDate = detectedDate;
+        }
+
+        updateState(nextState);
         
         const tx = document.getElementById('bulk-activity-textarea');
         if (tx) {
           tx.focus();
-          tx.setSelectionRange(tx.value.length, tx.value.length);
+          tx.setSelectionRange(start, end);
         }
       };
     }
@@ -3318,59 +3423,93 @@ function bindEvents() {
       btn.onclick = (e) => {
         const memberId = e.currentTarget.getAttribute('data-select-report-member');
         updateState({ reportSelectedMemberId: memberId });
+        
+        // Auto smooth scroll to card details so it is centered on mobile
+        setTimeout(() => {
+          const cardDetails = document.getElementById('printable-report-card');
+          if (cardDetails) {
+            cardDetails.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        }, 100);
       };
     });
 
-    // PNG downloader triggers
-    const pngBtn = document.getElementById('download-report-png');
-    if (pngBtn) {
-      pngBtn.onclick = () => {
-        const reportCard = document.getElementById('printable-report-card');
-        const selectedMember = state.members.find(m => m.id === state.reportSelectedMemberId);
-        if (!reportCard || !selectedMember) return;
+    // Unified PNG downloader triggers (CORS/IFrame proof & allowTaint)
+    const triggerPngDownload = () => {
+      const reportCard = document.getElementById('printable-report-card');
+      const selectedMember = state.members.find(m => m.id === state.reportSelectedMemberId);
+      if (!reportCard || !selectedMember) return;
 
-        updateState({ isDownloadingReport: true });
+      updateState({ isDownloadingReport: true });
 
-        setTimeout(() => {
-          const html2canvasFn = window.html2canvas || html2canvas;
-          html2canvasFn(reportCard, {
-            scale: 2, // high crisp definitions
-            backgroundColor: '#020617', // deep dark theme
-            logging: false,
-            useCORS: true,
-            allowTaint: false
-          }).then(canvas => {
-            const imgData = canvas.toDataURL('image/png');
-            const blob = dataURLtoBlob(imgData);
-            const blobUrl = blob ? URL.createObjectURL(blob) : imgData;
-            
-            // 1. Attempt desktop direct download
-            try {
-              const link = document.createElement('a');
-              link.style.display = 'none';
-              document.body.appendChild(link);
-              link.download = `${selectedMember.name.replace(/\s+/g, '_')}_Performance_Card.png`;
-              link.href = blobUrl;
-              link.click();
-              document.body.removeChild(link);
-            } catch (e) {
-              console.warn('Direct file download link click failed:', e);
+      setTimeout(() => {
+        // Safe cross-origin stylesheet bypass for sandboxed iframe compatibility
+        const disabledSheets = [];
+        const sheets = Array.from(document.styleSheets);
+        for (let i = 0; i < sheets.length; i++) {
+          try {
+            // Test if we can read cssRules. If it throws, we disable it.
+            const rules = sheets[i].cssRules;
+          } catch (e) {
+            if (sheets[i].ownerNode) {
+              sheets[i].ownerNode.disabled = true;
+              disabledSheets.push(sheets[i].ownerNode);
             }
+          }
+        }
 
-            // 2. Open state modal with the image URL for mobile users or cross-origin fallbacks
-            updateState({ 
-              isDownloadingReport: false,
-              generatedPngUrl: blobUrl,
-              generatedPngMemberName: selectedMember.name
-            });
-          }).catch(err => {
-            console.error('Canvas image generation failed:', err);
-            showToast('রিপোর্ট ইমেজ ডাউনলোড ব্যর্থ হয়েছে!', 'error');
-            updateState({ isDownloadingReport: false });
+        const restoreSheets = () => {
+          disabledSheets.forEach(node => {
+            node.disabled = false;
           });
-        }, 400);
-      };
-    }
+        };
+
+        const html2canvasFn = window.html2canvas || html2canvas;
+        html2canvasFn(reportCard, {
+          scale: 2, // high crisp definitions
+          backgroundColor: '#020617', // deep dark theme
+          logging: false,
+          useCORS: true,
+          allowTaint: true // ensures rendering is never blocked on CORS resources
+        }).then(canvas => {
+          restoreSheets();
+          const imgData = canvas.toDataURL('image/png');
+          const blob = dataURLtoBlob(imgData);
+          const blobUrl = blob ? URL.createObjectURL(blob) : imgData;
+          
+          // 1. Attempt desktop direct download
+          try {
+            const link = document.createElement('a');
+            link.style.display = 'none';
+            document.body.appendChild(link);
+            link.download = `${selectedMember.name.replace(/\s+/g, '_')}_Performance_Card.png`;
+            link.href = blobUrl;
+            link.click();
+            document.body.removeChild(link);
+          } catch (e) {
+            console.warn('Direct file download link click failed:', e);
+          }
+
+          // 2. Open state modal with the image URL for mobile users or cross-origin fallbacks
+          updateState({ 
+            isDownloadingReport: false,
+            generatedPngUrl: blobUrl,
+            generatedPngMemberName: selectedMember.name
+          });
+        }).catch(err => {
+          restoreSheets();
+          console.error('Canvas image generation failed:', err);
+          showToast('রিপোর্ট ইমেজ ডাউনলোড ব্যর্থ হয়েছে!', 'error');
+          updateState({ isDownloadingReport: false });
+        });
+      }, 400);
+    };
+
+    const pngBtn = document.getElementById('download-report-png');
+    if (pngBtn) pngBtn.onclick = triggerPngDownload;
+
+    const pngBtnTop = document.getElementById('download-report-png-top');
+    if (pngBtnTop) pngBtnTop.onclick = triggerPngDownload;
   }
 
   // TAB EVENTS: SUPABASE GUIDE
