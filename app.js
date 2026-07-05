@@ -317,24 +317,89 @@ export async function performSmartSync(silent = true) {
     }
 
     // CASE B: General non-destructive Bidirectional Merge
-    // 1. Merge Members (Key: id, Tie-breaker: updated_at)
-    const mergedMembersMap = new Map();
-    localMembers.forEach(m => { if (m && m.id) mergedMembersMap.set(m.id, m); });
+    // 1. Merge Members (Key: id OR normalized name, Tie-breaker: updated_at)
+    const mergedMembersMap = new Map(); // id -> member
+    const nameToIdMap = new Map(); // normalized_name -> id
+
+    localMembers.forEach(m => {
+      if (m && m.id) {
+        const normName = getNormalizedName(m.name);
+        const existingId = nameToIdMap.get(normName);
+        if (existingId) {
+          const em = mergedMembersMap.get(existingId);
+          const emTime = em.updated_at ? new Date(em.updated_at).getTime() : 0;
+          const mTime = m.updated_at ? new Date(m.updated_at).getTime() : 0;
+          if (mTime > emTime) {
+            mergedMembersMap.delete(existingId);
+            mergedMembersMap.set(m.id, {
+              ...em,
+              ...m,
+              total_points: Math.max(em.total_points || 0, m.total_points || 0),
+              current_streak: Math.max(em.current_streak || 0, m.current_streak || 0),
+              longest_streak: Math.max(em.longest_streak || 0, m.longest_streak || 0),
+              total_active_days: Math.max(em.total_active_days || 0, m.total_active_days || 0)
+            });
+            nameToIdMap.set(normName, m.id);
+          } else {
+            mergedMembersMap.set(existingId, {
+              ...m,
+              ...em,
+              total_points: Math.max(em.total_points || 0, m.total_points || 0),
+              current_streak: Math.max(em.current_streak || 0, m.current_streak || 0),
+              longest_streak: Math.max(em.longest_streak || 0, m.longest_streak || 0),
+              total_active_days: Math.max(em.total_active_days || 0, m.total_active_days || 0)
+            });
+          }
+        } else {
+          mergedMembersMap.set(m.id, m);
+          nameToIdMap.set(normName, m.id);
+        }
+      }
+    });
+
     rMembers.forEach(rm => {
       if (rm && rm.id) {
-        const lm = mergedMembersMap.get(rm.id);
-        if (!lm) {
+        const normName = getNormalizedName(rm.name);
+        const existingIdByName = nameToIdMap.get(normName);
+        const existingIdById = mergedMembersMap.has(rm.id) ? rm.id : null;
+        const existingId = existingIdByName || existingIdById;
+
+        if (!existingId) {
           mergedMembersMap.set(rm.id, rm);
+          nameToIdMap.set(normName, rm.id);
         } else {
-          const lmTime = lm.updated_at ? new Date(lm.updated_at).getTime() : 0;
+          const em = mergedMembersMap.get(existingId);
+          const emTime = em.updated_at ? new Date(em.updated_at).getTime() : 0;
           const rmTime = rm.updated_at ? new Date(rm.updated_at).getTime() : 0;
-          if (rmTime > lmTime) {
-            mergedMembersMap.set(rm.id, rm);
+
+          if (rmTime > emTime) {
+            if (existingId !== rm.id) {
+              mergedMembersMap.delete(existingId);
+            }
+            mergedMembersMap.set(rm.id, {
+              ...em,
+              ...rm,
+              total_points: Math.max(em.total_points || 0, rm.total_points || 0),
+              current_streak: Math.max(em.current_streak || 0, rm.current_streak || 0),
+              longest_streak: Math.max(em.longest_streak || 0, rm.longest_streak || 0),
+              total_active_days: Math.max(em.total_active_days || 0, rm.total_active_days || 0)
+            });
+            nameToIdMap.set(normName, rm.id);
+          } else {
+            mergedMembersMap.set(existingId, {
+              ...rm,
+              ...em,
+              total_points: Math.max(em.total_points || 0, rm.total_points || 0),
+              current_streak: Math.max(em.current_streak || 0, rm.current_streak || 0),
+              longest_streak: Math.max(em.longest_streak || 0, rm.longest_streak || 0),
+              total_active_days: Math.max(em.total_active_days || 0, rm.total_active_days || 0)
+            });
           }
         }
       }
     });
-    const mergedMembers = Array.from(mergedMembersMap.values());
+    const mergedMembersRaw = Array.from(mergedMembersMap.values());
+    const mergedMembers = deduplicateMembers(mergedMembersRaw, client);
 
     // 2. Merge Activity Logs (Key: id)
     const mergedLogsMap = new Map();
@@ -646,8 +711,116 @@ export function getNormalizedName(name) {
   if (!name) return '';
   return name.toLowerCase()
     .replace(/^@/, '')
-    .replace(/[\s\u00A0\u200B]+/g, ' ')
+    .replace(/[\s\u00A0\u200B\u200C\u200D\u200E\u200F\uFEFF]+/g, '')
     .trim();
+}
+
+export function dataURLtoBlob(dataurl) {
+  try {
+    const arr = dataurl.split(',');
+    const mime = arr[0].match(/:(.*?);/)[1];
+    const bstr = atob(arr[1]);
+    let n = bstr.length;
+    const u8arr = new Uint8Array(n);
+    while (n--) {
+      u8arr[n] = bstr.charCodeAt(n);
+    }
+    return new Blob([u8arr], { type: mime });
+  } catch (e) {
+    console.error('Failed to convert data URL to Blob:', e);
+    return null;
+  }
+}
+
+export function deduplicateMembers(members, client = null) {
+  const uniqueMembers = [];
+  const seenNormalizedNames = new Set();
+  const duplicatesToDelete = [];
+
+  // Sort members so that the one with higher points or more recent update comes first
+  const sorted = [...members].sort((a, b) => {
+    const pointsDiff = (b.total_points || 0) - (a.total_points || 0);
+    if (pointsDiff !== 0) return pointsDiff;
+    const aTime = a.updated_at ? new Date(a.updated_at).getTime() : 0;
+    const bTime = b.updated_at ? new Date(b.updated_at).getTime() : 0;
+    return bTime - aTime;
+  });
+
+  sorted.forEach(m => {
+    const norm = getNormalizedName(m.name);
+    if (!norm) return;
+    if (seenNormalizedNames.has(norm)) {
+      duplicatesToDelete.push(m);
+    } else {
+      seenNormalizedNames.add(norm);
+      uniqueMembers.push(m);
+    }
+  });
+
+  if (duplicatesToDelete.length > 0) {
+    console.log(`Deduplicating: found ${duplicatesToDelete.length} duplicate names to clean up.`, duplicatesToDelete.map(d => d.name));
+    
+    // For each duplicate, map its ID to the surviving ID
+    const idMap = new Map(); // deleted_id -> surviving_id
+    sorted.forEach(m => {
+      const norm = getNormalizedName(m.name);
+      const survivor = uniqueMembers.find(u => getNormalizedName(u.name) === norm);
+      if (survivor && survivor.id !== m.id) {
+        idMap.set(m.id, survivor.id);
+      }
+    });
+
+    // Update local logs and badges
+    const logs = JSON.parse(localStorage.getItem(STORAGE_KEYS.LOGS) || '[]');
+    let logsUpdated = false;
+    logs.forEach(l => {
+      if (idMap.has(l.member_id)) {
+        l.member_id = idMap.get(l.member_id);
+        l.updated_at = new Date().toISOString();
+        logsUpdated = true;
+      }
+    });
+    if (logsUpdated) {
+      localStorage.setItem(STORAGE_KEYS.LOGS, JSON.stringify(logs));
+    }
+
+    const badges = JSON.parse(localStorage.getItem(STORAGE_KEYS.BADGES) || '[]');
+    let badgesUpdated = false;
+    badges.forEach(b => {
+      if (idMap.has(b.member_id)) {
+        b.member_id = idMap.get(b.member_id);
+        b.updated_at = new Date().toISOString();
+        badgesUpdated = true;
+      }
+    });
+    if (badgesUpdated) {
+      localStorage.setItem(STORAGE_KEYS.BADGES, JSON.stringify(badges));
+    }
+
+    // Remote delete and update
+    if (client) {
+      const ids = duplicatesToDelete.map(d => d.id);
+      client.from('members').delete().in('id', ids).then(({ error }) => {
+        if (error) console.error('Failed to remote-delete duplicate members:', error);
+      });
+
+      const logsToUpsert = logs.filter(l => idMap.has(l.member_id));
+      if (logsToUpsert.length > 0) {
+        client.from('activity_logs').upsert(logsToUpsert).then(({ error }) => {
+          if (error) console.error('Failed to align remote logs after deduplication:', error);
+        });
+      }
+
+      const badgesToUpsert = badges.filter(b => idMap.has(b.member_id));
+      if (badgesToUpsert.length > 0) {
+        client.from('badges').upsert(badgesToUpsert).then(({ error }) => {
+          if (error) console.error('Failed to align remote badges after deduplication:', error);
+        });
+      }
+    }
+  }
+
+  return uniqueMembers;
 }
 
 // PWA Installer global state
@@ -692,7 +865,8 @@ let state = {
   showKeyInput: false,
   uncheckedUnregisteredNames: [],
   developerUnlocked: typeof sessionStorage !== 'undefined' && sessionStorage.getItem('developer_unlocked') === 'true',
-  toast: null
+  toast: null,
+  confirmModal: null
 };
 
 // Auto-extract URL query params and secrets
@@ -740,7 +914,15 @@ export function initSupabaseConfig() {
 function loadStateFromStorage() {
   initializeDatabase();
   initSupabaseConfig();
-  state.members = getMembers();
+  
+  const rawLocalMembers = getMembers();
+  const supabaseClient = getSupabase();
+  const cleanedMembers = deduplicateMembers(rawLocalMembers, supabaseClient);
+  if (cleanedMembers.length !== rawLocalMembers.length) {
+    localStorage.setItem(STORAGE_KEYS.MEMBERS, JSON.stringify(cleanedMembers));
+  }
+  
+  state.members = cleanedMembers;
   state.auditTrails = getAuditTrails();
   state.currentAdminEmail = getCurrentAdmin();
   
@@ -764,6 +946,45 @@ export function showToast(message, type = 'success') {
   }, 4000);
 }
 
+// Custom Modal Alert & Confirmation Dialog System
+export function showAlert(message, title = 'সতর্কতা', onOk = null) {
+  updateState({
+    confirmModal: {
+      title,
+      message,
+      onConfirm: () => {
+        updateState({ confirmModal: null });
+        if (onOk) onOk();
+      },
+      onCancel: () => {
+        updateState({ confirmModal: null });
+        if (onOk) onOk();
+      },
+      confirmText: 'ঠিক আছে',
+      cancelText: '' // Empty means alert modal (no cancel button)
+    }
+  });
+}
+
+export function showConfirm(message, onConfirm, onCancel = null, title = 'অনুমোদন দিন', confirmText = 'নিশ্চিত করুন', cancelText = 'বাতিল') {
+  updateState({
+    confirmModal: {
+      title,
+      message,
+      onConfirm: () => {
+        updateState({ confirmModal: null });
+        if (onConfirm) onConfirm();
+      },
+      onCancel: () => {
+        updateState({ confirmModal: null });
+        if (onCancel) onCancel();
+      },
+      confirmText,
+      cancelText
+    }
+  });
+}
+
 // Unified State Mutator & Render Trigger
 function updateState(newState) {
   state = { ...state, ...newState };
@@ -774,14 +995,14 @@ function updateState(newState) {
 function handleAddMember(rawName, notes = '') {
   const cleaned = cleanName(rawName);
   if (!cleaned) {
-    alert('মেম্বার এর নাম ফাকা হতে পারে না!');
+    showToast('মেম্বার এর নাম ফাকা হতে পারে না!', 'error');
     return false;
   }
 
   const members = getMembers();
   const duplicate = members.find(m => getNormalizedName(m.name) === getNormalizedName(cleaned));
   if (duplicate) {
-    alert(`এই নামের অন্য লোক আছে! অনুগ্রহ করে নামের শেষে '1', '2' বা 'A', 'B' কিছু লাগিয়ে দিন (যেমন: ${cleaned} A)`);
+    showAlert(`এই নামের অন্য লোক আছে! অনুগ্রহ করে নামের শেষে '1', '2' বা 'A', 'B' কিছু লাগিয়ে দিন (যেমন: ${cleaned} A)`, 'ডুপ্লিকেট মেম্বার');
     return false;
   }
 
@@ -936,10 +1157,12 @@ function parseBulkActivityText(text) {
 
   parsedNames.forEach(rawName => {
     const cleaned = cleanName(rawName);
-    const match = members.find(m => 
-      m.name.toLowerCase().replace(/\s+/g, '') === cleaned.toLowerCase().replace(/\s+/g, '') ||
-      m.display_name?.toLowerCase().replace(/[@\s]+/g, '') === cleaned.toLowerCase().replace(/\s+/g, '')
-    );
+    const match = members.find(m => {
+      const normMName = getNormalizedName(m.name);
+      const normMDisplayName = getNormalizedName(m.display_name || '');
+      const normCleaned = getNormalizedName(cleaned);
+      return normMName === normCleaned || normMDisplayName === normCleaned;
+    });
 
     if (match) {
       if (!matchedMembers.some(m => m.id === match.id)) {
@@ -1466,6 +1689,29 @@ function render() {
       </button>
     </div>
     ` : ''}
+
+    ${state.confirmModal ? `
+    <!-- Custom beautiful confirmation modal -->
+    <div id="custom-confirm-modal" class="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-[100] flex items-center justify-center p-4">
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-sm w-full p-6 shadow-2xl relative space-y-4 animate-scale-in">
+        <div class="flex items-center gap-3 text-indigo-400">
+          <i data-lucide="help-circle" class="w-6 h-6"></i>
+          <h3 class="font-extrabold text-slate-100 text-xs tracking-wide uppercase">${state.confirmModal.title || 'অনুমোদন দিন'}</h3>
+        </div>
+        <p class="text-[11px] text-slate-300 font-medium leading-relaxed">${state.confirmModal.message}</p>
+        <div class="flex justify-end gap-3 pt-2">
+          ${state.confirmModal.cancelText ? `
+            <button id="custom-confirm-cancel-btn" class="bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-[10px] px-4 py-2 rounded-xl transition cursor-pointer">
+              ${state.confirmModal.cancelText}
+            </button>
+          ` : ''}
+          <button id="custom-confirm-ok-btn" class="bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-[10px] px-5 py-2 rounded-xl shadow-lg transition cursor-pointer">
+            ${state.confirmModal.confirmText || 'নিশ্চিত করুন'}
+          </button>
+        </div>
+      </div>
+    </div>
+    ` : ''}
   `;
 
   // Hot Reload Icons
@@ -1957,6 +2203,85 @@ ${listText}
             </div>
           </div>
 
+          <!-- Beautifully styled premium stats cards on Homepage (Side-by-side horizontal scroll on mobile, grid on desktop) -->
+          <div class="overflow-x-auto scrollbar-none -mx-4 px-4 sm:mx-0 sm:px-0 pb-1 relative z-10">
+            <div class="flex sm:grid sm:grid-cols-4 gap-3.5 min-w-[620px] sm:min-w-0 pb-2">
+              
+              <!-- Total Members Card -->
+              <div class="flex-1 min-w-[145px] bg-gradient-to-br from-slate-900/90 to-slate-950/90 border border-indigo-500/15 p-4 rounded-xl relative overflow-hidden group hover:border-indigo-500/35 transition duration-300 shadow-[0_4px_20px_rgba(0,0,0,0.3)]">
+                <div class="absolute -right-4 -bottom-4 w-16 h-16 bg-indigo-500/5 rounded-full blur-xl group-hover:bg-indigo-500/10 transition duration-300 pointer-events-none"></div>
+                <div class="flex items-center justify-between gap-1">
+                  <span class="text-[9px] font-extrabold text-slate-400 uppercase tracking-wider">মোট মেম্বার</span>
+                  <span class="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse shadow-[0_0_6px_#818cf8]"></span>
+                </div>
+                <div class="mt-3 flex items-center justify-between">
+                  <div class="flex items-baseline gap-1">
+                    <span class="text-2xl sm:text-3xl font-black text-white tracking-tight font-mono">${totalCount}</span>
+                    <span class="text-[9px] text-indigo-400/80 font-bold">জন</span>
+                  </div>
+                  <div class="w-7 h-7 rounded-lg bg-indigo-500/10 flex items-center justify-center text-indigo-400 border border-indigo-500/20">
+                    <i data-lucide="users" class="w-3.5 h-3.5"></i>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Active Members Card -->
+              <div class="flex-1 min-w-[145px] bg-gradient-to-br from-slate-900/90 to-slate-950/90 border border-emerald-500/15 p-4 rounded-xl relative overflow-hidden group hover:border-emerald-500/35 transition duration-300 shadow-[0_4px_20px_rgba(0,0,0,0.3)]">
+                <div class="absolute -right-4 -bottom-4 w-16 h-16 bg-emerald-500/5 rounded-full blur-xl group-hover:bg-emerald-500/10 transition duration-300 pointer-events-none"></div>
+                <div class="flex items-center justify-between gap-1">
+                  <span class="text-[9px] font-extrabold text-slate-400 uppercase tracking-wider">সক্রিয় মেম্বার</span>
+                  <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_6px_#34d399]"></span>
+                </div>
+                <div class="mt-3 flex items-center justify-between">
+                  <div class="flex items-baseline gap-1">
+                    <span class="text-2xl sm:text-3xl font-black text-emerald-400 tracking-tight font-mono">${activeCount}</span>
+                    <span class="text-[9px] text-emerald-400/80 font-bold">জন</span>
+                  </div>
+                  <div class="w-7 h-7 rounded-lg bg-emerald-500/10 flex items-center justify-center text-emerald-400 border border-emerald-500/20">
+                    <i data-lucide="shield-check" class="w-3.5 h-3.5"></i>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Inactive Members Card -->
+              <div class="flex-1 min-w-[145px] bg-gradient-to-br from-slate-900/90 to-slate-950/90 border border-rose-500/15 p-4 rounded-xl relative overflow-hidden group hover:border-rose-500/35 transition duration-300 shadow-[0_4px_20px_rgba(0,0,0,0.3)]">
+                <div class="absolute -right-4 -bottom-4 w-16 h-16 bg-rose-500/5 rounded-full blur-xl group-hover:bg-rose-500/10 transition duration-300 pointer-events-none"></div>
+                <div class="flex items-center justify-between gap-1">
+                  <span class="text-[9px] font-extrabold text-slate-400 uppercase tracking-wider">নিষ্ক্রিয় মেম্বার</span>
+                  <span class="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse shadow-[0_0_6px_#f43f5e]"></span>
+                </div>
+                <div class="mt-3 flex items-center justify-between">
+                  <div class="flex items-baseline gap-1">
+                    <span class="text-2xl sm:text-3xl font-black text-rose-400 tracking-tight font-mono">${inactiveCount}</span>
+                    <span class="text-[9px] text-rose-400/80 font-bold">জন</span>
+                  </div>
+                  <div class="w-7 h-7 rounded-lg bg-rose-500/10 flex items-center justify-center text-rose-400 border border-rose-500/20">
+                    <i data-lucide="alert-triangle" class="w-3.5 h-3.5"></i>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Diamond Members Card -->
+              <div class="flex-1 min-w-[145px] bg-gradient-to-br from-slate-900/90 to-slate-950/90 border border-cyan-500/15 p-4 rounded-xl relative overflow-hidden group hover:border-cyan-500/35 transition duration-300 shadow-[0_4px_20px_rgba(0,0,0,0.3)]">
+                <div class="absolute -right-4 -bottom-4 w-16 h-16 bg-cyan-500/5 rounded-full blur-xl group-hover:bg-cyan-500/10 transition duration-300 pointer-events-none"></div>
+                <div class="flex items-center justify-between gap-1">
+                  <span class="text-[9px] font-extrabold text-slate-400 uppercase tracking-wider">ডায়মন্ড মেম্বার</span>
+                  <span class="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse shadow-[0_0_6px_#22d3ee]"></span>
+                </div>
+                <div class="mt-3 flex items-center justify-between">
+                  <div class="flex items-baseline gap-1">
+                    <span class="text-2xl sm:text-3xl font-black text-cyan-400 tracking-tight font-mono">${diamondCount}</span>
+                    <span class="text-[9px] text-cyan-400/80 font-bold">জন</span>
+                  </div>
+                  <div class="w-7 h-7 rounded-lg bg-cyan-500/10 flex items-center justify-center text-cyan-400 border border-cyan-500/20">
+                    <i data-lucide="gem" class="w-3.5 h-3.5"></i>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
           <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
             
             <!-- Left: Active Leaderboards list -->
@@ -2371,6 +2696,24 @@ ${listText}
 // Interactive Event binding to the generated HTML elements
 function bindEvents() {
   
+  // Bind custom confirm modal buttons
+  const customConfirmOk = document.getElementById('custom-confirm-ok-btn');
+  if (customConfirmOk && state.confirmModal) {
+    customConfirmOk.onclick = () => {
+      if (state.confirmModal && state.confirmModal.onConfirm) {
+        state.confirmModal.onConfirm();
+      }
+    };
+  }
+  const customConfirmCancel = document.getElementById('custom-confirm-cancel-btn');
+  if (customConfirmCancel && state.confirmModal) {
+    customConfirmCancel.onclick = () => {
+      if (state.confirmModal && state.confirmModal.onCancel) {
+        state.confirmModal.onCancel();
+      }
+    };
+  }
+
   // Tab change button event delegation
   document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.onclick = (e) => {
@@ -2448,7 +2791,7 @@ function bindEvents() {
           loadStateFromStorage();
           updateState({});
         } else {
-          alert('সঠিক ইমেইল এড্রেস প্রদান করুন!');
+          showToast('সতর্কতা: অনুগ্রহ করে সঠিক ইমেইল এড্রেস প্রদান করুন!', 'error');
           updateState({});
         }
       } else {
@@ -2558,17 +2901,22 @@ function bindEvents() {
     const clearDemoBtn = document.getElementById('clear-demo-btn');
     if (clearDemoBtn) {
       clearDemoBtn.onclick = () => {
-        if (confirm('আপনি কি সত্যিই সমস্ত ডেমো মেম্বার এবং অ্যাক্টিভিটি ডেটা মুছে সম্পূর্ণ খালি করতে চান? এই একশনটি আর ফেরত আনা যাবে না!')) {
-          localStorage.removeItem(STORAGE_KEYS.MEMBERS);
-          localStorage.removeItem(STORAGE_KEYS.LOGS);
-          localStorage.removeItem(STORAGE_KEYS.AUDIT);
-          localStorage.removeItem(STORAGE_KEYS.BADGES);
-          
-          initializeDatabase();
-          loadStateFromStorage();
-          updateState({});
-          showToast('সাপোর্ট লিংক বক্স ডাটাবেজ সফলভাবে সম্পূর্ণ রিসেট করা হয়েছে!', 'success');
-        }
+        showConfirm(
+          'আপনি কি সত্যিই সমস্ত ডেমো মেম্বার এবং অ্যাক্টিভিটি ডেটা মুছে সম্পূর্ণ খালি করতে চান? এই একশনটি আর ফেরত আনা যাবে না!',
+          () => {
+            localStorage.removeItem(STORAGE_KEYS.MEMBERS);
+            localStorage.removeItem(STORAGE_KEYS.LOGS);
+            localStorage.removeItem(STORAGE_KEYS.AUDIT);
+            localStorage.removeItem(STORAGE_KEYS.BADGES);
+            
+            initializeDatabase();
+            loadStateFromStorage();
+            updateState({});
+            showToast('সাপোর্ট লিংক বক্স ডাটাবেজ সফলভাবে সম্পূর্ণ রিসেট করা হয়েছে!', 'success');
+          },
+          null,
+          'ডাটাবেজ রিসেট করুন'
+        );
       };
     }
 
@@ -2609,37 +2957,43 @@ function bindEvents() {
     document.querySelectorAll('[data-reset-stats]').forEach(btn => {
       btn.onclick = (e) => {
         const memberId = e.currentTarget.getAttribute('data-reset-stats');
-        if (!confirm('আপনি কি সত্যিই এই মেম্বারের অর্জিত পয়েন্ট, লেভেল এবং স্ট্রেইক শুন্য (0) করতে চান?')) return;
-        
-        const members = getMembers();
-        const mIdx = members.findIndex(m => m.id === memberId);
-        if (mIdx !== -1) {
-          members[mIdx].total_points = 0;
-          members[mIdx].current_streak = 0;
-          members[mIdx].longest_streak = 0;
-          members[mIdx].total_active_days = 0;
-          members[mIdx].level = 'Bronze';
-          members[mIdx].consecutive_inactive_days = 0;
-          members[mIdx].status = 'active';
-          members[mIdx].updated_at = new Date().toISOString();
-          saveMembers(members);
+        showConfirm(
+          'আপনি কি সত্যিই এই মেম্বারের অর্জিত পয়েন্ট, লেভেল এবং স্ট্রেইক শুন্য (0) করতে চান?',
+          () => {
+            const members = getMembers();
+            const mIdx = members.findIndex(m => m.id === memberId);
+            if (mIdx !== -1) {
+              members[mIdx].total_points = 0;
+              members[mIdx].current_streak = 0;
+              members[mIdx].longest_streak = 0;
+              members[mIdx].total_active_days = 0;
+              members[mIdx].level = 'Bronze';
+              members[mIdx].consecutive_inactive_days = 0;
+              members[mIdx].status = 'active';
+              members[mIdx].updated_at = new Date().toISOString();
+              saveMembers(members);
 
-          // Audit
-          const trails = getAuditTrails();
-          trails.unshift({
-            id: `audit-${Date.now()}`,
-            admin_email: state.currentAdminEmail,
-            admin_name: ADMIN_NAMES[state.currentAdminEmail],
-            action: 'RESET_MEMBER',
-            entity_type: 'MEMBER',
-            description: `Reset all activity points and streaks to zero for: ${members[mIdx].name}`,
-            timestamp: new Date().toISOString()
-          });
-          saveAuditTrails(trails);
+              // Audit
+              const trails = getAuditTrails();
+              trails.unshift({
+                id: `audit-${Date.now()}`,
+                admin_email: state.currentAdminEmail,
+                admin_name: ADMIN_NAMES[state.currentAdminEmail],
+                action: 'RESET_MEMBER',
+                entity_type: 'MEMBER',
+                description: `Reset all activity points and streaks to zero for: ${members[mIdx].name}`,
+                timestamp: new Date().toISOString()
+              });
+              saveAuditTrails(trails);
 
-          loadStateFromStorage();
-          updateState({});
-        }
+              loadStateFromStorage();
+              updateState({});
+              showToast('মেম্বারের অর্জিত পয়েন্ট ও স্ট্রেইক শুন্য করা হয়েছে!', 'success');
+            }
+          },
+          null,
+          'মেম্বার রিসেট করুন'
+        );
       };
     });
 
@@ -2650,26 +3004,32 @@ function bindEvents() {
         const member = members.find(m => m.id === memberId);
         if (!member) return;
 
-        if (confirm(`আপনি কি সত্যিই "${member.name}" কে গ্রুপ ডাটাবেজ থেকে মুছে ফেলতে চান? এটি রিভার্স করা যাবে না!`)) {
-          const filtered = members.filter(m => m.id !== memberId);
-          saveMembers(filtered);
+        showConfirm(
+          `আপনি কি সত্যিই "${member.name}" কে গ্রুপ ডাটাবেজ থেকে মুছে ফেলতে চান? এটি রিভার্স করা যাবে না!`,
+          () => {
+            const filtered = members.filter(m => m.id !== memberId);
+            saveMembers(filtered);
 
-          // Audit trail log
-          const trails = getAuditTrails();
-          trails.unshift({
-            id: `audit-${Date.now()}`,
-            admin_email: state.currentAdminEmail,
-            admin_name: ADMIN_NAMES[state.currentAdminEmail],
-            action: 'DELETE_MEMBER',
-            entity_type: 'MEMBER',
-            description: `Deleted registered member: ${member.name} (No. ${member.member_number})`,
-            timestamp: new Date().toISOString()
-          });
-          saveAuditTrails(trails);
+            // Audit trail log
+            const trails = getAuditTrails();
+            trails.unshift({
+              id: `audit-${Date.now()}`,
+              admin_email: state.currentAdminEmail,
+              admin_name: ADMIN_NAMES[state.currentAdminEmail],
+              action: 'DELETE_MEMBER',
+              entity_type: 'MEMBER',
+              description: `Deleted registered member: ${member.name} (No. ${member.member_number})`,
+              timestamp: new Date().toISOString()
+            });
+            saveAuditTrails(trails);
 
-          loadStateFromStorage();
-          updateState({});
-        }
+            loadStateFromStorage();
+            updateState({});
+            showToast(`"${member.name}" কে ডাটাবেজ থেকে মুছে ফেলা হয়েছে!`, 'success');
+          },
+          null,
+          'মেম্বার মুছে ফেলুন'
+        );
       };
     });
 
@@ -2756,9 +3116,14 @@ function bindEvents() {
         const { matchedMembers } = parseBulkActivityText(state.bulkInputText);
         if (matchedMembers.length === 0) return;
         
-        if (confirm(`আপনি কি সত্যিই নির্বাচিত তারিখ (${state.bulkInputDate}) এ ${matchedMembers.length} জন সক্রিয় মেম্বারের ডেইলি এক্টিভিটি সেভ করতে চান?`)) {
-          submitBulkActivity(state.bulkInputDate, matchedMembers.map(m => m.id));
-        }
+        showConfirm(
+          `আপনি কি সত্যিই নির্বাচিত তারিখ (${state.bulkInputDate}) এ ${matchedMembers.length} জন সক্রিয় মেম্বারের ডেইলি এক্টিভিটি সেভ করতে চান?`,
+          () => {
+            submitBulkActivity(state.bulkInputDate, matchedMembers.map(m => m.id));
+          },
+          null,
+          'এক্টিভিটি সেভ করুন'
+        );
       };
     }
 
@@ -2767,7 +3132,7 @@ function bindEvents() {
       btn.onclick = (e) => {
         const rawName = e.currentTarget.getAttribute('data-quick-add-name');
         if (handleAddMember(rawName)) {
-          alert(`"${rawName}" সফলভাবে ডাটাবেজে রেজিস্টার হয়েছে এবং এখন একটিভ তালিকায় সনাক্ত করা যাবে!`);
+          showToast(`"${rawName}" সফলভাবে ডাটাবেজে রেজিস্টার হয়েছে এবং এখন একটিভ তালিকায় সনাক্ত করা যাবে!`, 'success');
         }
       };
     });
@@ -2847,20 +3212,25 @@ function bindEvents() {
         
         if (namesToReg.length === 0) return;
         
-        if (confirm(`আপনি কি সত্যিই নির্বাচিত ${namesToReg.length} জন নতুন মেম্বারকে একসাথে ডেটাবেজে রেজিস্টার করতে চান?`)) {
-          const result = handleBulkAddMembers(namesToReg);
-          
-          if (result.successCount > 0) {
-            let msg = `${result.successCount} জন নতুন মেম্বার সফলভাবে ডাটাবেজে রেজিস্টার হয়েছে এবং এখন তাদের একটিভ মেম্বার হিসেবে ট্র্যাকার চেকলিস্টে পাওয়া যাবে!`;
-            if (result.duplicateNames.length > 0) {
-              msg += ` (এবং ${result.duplicateNames.length} জন অলরেডি রেজিস্টার্ড থাকায় বাদ দেওয়া হয়েছে)`;
+        showConfirm(
+          `আপনি কি সত্যিই নির্বাচিত ${namesToReg.length} জন নতুন মেম্বারকে একসাথে ডেটাবেজে রেজিস্টার করতে চান?`,
+          () => {
+            const result = handleBulkAddMembers(namesToReg);
+            
+            if (result.successCount > 0) {
+              let msg = `${result.successCount} জন নতুন মেম্বার সফলভাবে ডাটাবেজে রেজিস্টার হয়েছে এবং এখন তাদের একটিভ মেম্বার হিসেবে ট্র্যাকার চেকলিস্টে পাওয়া যাবে!`;
+              if (result.duplicateNames.length > 0) {
+                msg += ` (এবং ${result.duplicateNames.length} জন অলরেডি রেজিস্টার্ড থাকায় বাদ দেওয়া হয়েছে)`;
+              }
+              showToast(msg, 'success');
+              updateState({});
+            } else {
+              showToast('কোনো নতুন মেম্বার রেজিস্টার করা যায়নি। হয়তো তারা ইতিমধ্যে রেজিস্টার্ড!', 'error');
             }
-            alert(msg);
-            updateState({});
-          } else {
-            alert('কোনো নতুন মেম্বার রেজিস্টার করা যায়নি। হয়তো তারা ইতিমধ্যে রেজিস্টার্ড!');
-          }
-        }
+          },
+          null,
+          'মেম্বার বাল্ক রেজিস্ট্রেশন'
+        );
       };
     }
   }
@@ -2888,7 +3258,7 @@ function bindEvents() {
           }, 3000);
         }).catch(err => {
           console.error('Clipboard copy failed:', err);
-          alert('ক্লিপবোর্ডে কপি করা যায়নি। অনুগ্রহ করে ম্যানুয়ালি সিলেক্ট করে কপি করুন।');
+          showToast('ক্লিপবোর্ডে কপি করা যায়নি। অনুগ্রহ করে ম্যানুয়ালি সিলেক্ট করে কপি করুন।', 'error');
         });
       };
     }
@@ -2971,13 +3341,18 @@ function bindEvents() {
             allowTaint: false
           }).then(canvas => {
             const imgData = canvas.toDataURL('image/png');
+            const blob = dataURLtoBlob(imgData);
+            const blobUrl = blob ? URL.createObjectURL(blob) : imgData;
             
             // 1. Attempt desktop direct download
             try {
               const link = document.createElement('a');
+              link.style.display = 'none';
+              document.body.appendChild(link);
               link.download = `${selectedMember.name.replace(/\s+/g, '_')}_Performance_Card.png`;
-              link.href = imgData;
+              link.href = blobUrl;
               link.click();
+              document.body.removeChild(link);
             } catch (e) {
               console.warn('Direct file download link click failed:', e);
             }
@@ -2985,12 +3360,12 @@ function bindEvents() {
             // 2. Open state modal with the image URL for mobile users or cross-origin fallbacks
             updateState({ 
               isDownloadingReport: false,
-              generatedPngUrl: imgData,
+              generatedPngUrl: blobUrl,
               generatedPngMemberName: selectedMember.name
             });
           }).catch(err => {
             console.error('Canvas image generation failed:', err);
-            alert('রিপোর্ট ইমেজ ডাউনলোড ব্যর্থ হয়েছে!');
+            showToast('রিপোর্ট ইমেজ ডাউনলোড ব্যর্থ হয়েছে!', 'error');
             updateState({ isDownloadingReport: false });
           });
         }, 400);
@@ -3059,22 +3434,27 @@ function bindEvents() {
     const clearCfgBtn = document.getElementById('clear-supabase-config-btn');
     if (clearCfgBtn) {
       clearCfgBtn.onclick = () => {
-        if (confirm('আপনি কি সত্যিই আপনার ব্রাউজারে সংরক্ষিত Supabase API ক্রেডেনশিয়ালস মুছে ফেলতে চান?')) {
-          localStorage.removeItem(STORAGE_KEYS.SUPABASE_URL);
-          localStorage.removeItem(STORAGE_KEYS.SUPABASE_KEY);
-          
-          cachedSupabaseClient = null; // Invalidate cached client
-          state.supabaseUrl = '';
-          state.supabaseKey = '';
-          state.loadedFromEnv = false;
-          initSupabaseConfig();
-          
-          updateState({ 
-            supabaseConnectionStatus: 'idle',
-            supabaseConnectionError: ''
-          });
-          alert('সংরক্ষিত ক্রেডেনশিয়ালস সফলভাবে মুছে ফেলা হয়েছে!');
-        }
+        showConfirm(
+          'আপনি কি সত্যিই আপনার ব্রাউজারে সংরক্ষিত Supabase API ক্রেডেনশিয়ালস মুছে ফেলতে চান?',
+          () => {
+            localStorage.removeItem(STORAGE_KEYS.SUPABASE_URL);
+            localStorage.removeItem(STORAGE_KEYS.SUPABASE_KEY);
+            
+            cachedSupabaseClient = null; // Invalidate cached client
+            state.supabaseUrl = '';
+            state.supabaseKey = '';
+            state.loadedFromEnv = false;
+            initSupabaseConfig();
+            
+            updateState({ 
+              supabaseConnectionStatus: 'idle',
+              supabaseConnectionError: ''
+            });
+            showToast('সংরক্ষিত ক্রেডেনশিয়ালস সফলভাবে মুছে ফেলা হয়েছে!', 'success');
+          },
+          null,
+          'ক্রেডেনশিয়ালস মুছুন'
+        );
       };
     }
     
@@ -3089,7 +3469,7 @@ function bindEvents() {
           const key = keyInp.value.trim();
           
           if (!url || !key) {
-            alert('অনুগ্রহ করে সঠিক Supabase URL এবং Public Key প্রদান করুন!');
+            showToast('সতর্কতা: অনুগ্রহ করে সঠিক Supabase URL এবং Public Key প্রদান করুন!', 'error');
             return;
           }
           
@@ -3102,9 +3482,9 @@ function bindEvents() {
           // Trigger a live connection test
           const isOk = await testSupabaseConnection();
           if (isOk) {
-            alert('ক্রেডেনশিয়ালস সফলভাবে সেভ হয়েছে এবং কানেকশন সফল হয়েছে!');
+            showToast('ক্রেডেনশিয়ালস সফলভাবে সেভ হয়েছে এবং কানেকশন সফল হয়েছে!', 'success');
           } else {
-            alert('ক্রেডেনশিয়ালস সেভ হয়েছে কিন্তু কানেকশন টেস্ট ব্যর্থ হয়েছে! অনুগ্রহ করে URL/Key বা SQL টেবিল স্ট্রাকচার চেক করুন।');
+            showAlert('ক্রেডেনশিয়ালস সেভ হয়েছে কিন্তু কানেকশন টেস্ট ব্যর্থ হয়েছে! অনুগ্রহ করে URL/Key বা SQL টেবিল স্ট্রাকচার চেক করুন।', 'কানেকশন টেস্ট ব্যর্থ');
           }
         }
       };
@@ -3116,9 +3496,9 @@ function bindEvents() {
       testConnBtn.onclick = async () => {
         const isOk = await testSupabaseConnection();
         if (isOk) {
-          alert('কানেকশন টেস্ট সফল! Supabase লাইভ এবং প্রস্তুত।');
+          showToast('কানেকশন টেস্ট সফল! Supabase লাইভ এবং প্রস্তুত।', 'success');
         } else {
-          alert('কানেকশন টেস্ট ব্যর্থ হয়েছে! আপনার SQL কোড রান করা হয়েছে কিনা এবং ক্রেডেনশিয়ালস সঠিক কিনা তা পুনরায় চেক করুন।');
+          showAlert('কানেকশন টেস্ট ব্যর্থ হয়েছে! আপনার SQL কোড রান করা হয়েছে কিনা এবং ক্রেডেনশিয়ালস সঠিক কিনা তা পুনরায় চেক করুন।', 'কানেকশন টেস্ট ব্যর্থ');
         }
       };
     }
@@ -3132,14 +3512,14 @@ function bindEvents() {
         updateState({ supabaseSyncEnabled: checked });
         if (checked) {
           setupSupabaseRealtime();
-          alert('লাইভ ব্যাকগ্রাউন্ড অটো-সিংক্রোনাইজেশন চালু করা হয়েছে। এখন থেকে সমস্ত নতুন এক্টিভিটি ও মেম্বার পরিবর্তন স্বয়ংক্রিয়ভাবে Supabase-এ আপলোড হবে।');
+          showToast('লাইভ ব্যাকগ্রাউন্ড অটো-সিংক্রোনাইজেশন চালু করা হয়েছে!', 'success');
         } else {
           const client = getSupabase();
           if (client && realtimeChannel) {
             client.removeChannel(realtimeChannel);
             realtimeChannel = null;
           }
-          alert('ব্যাকগ্রাউন্ড অটো-সিংক্রোনাইজেশন বন্ধ করা হয়েছে।');
+          showToast('ব্যাকগ্রাউন্ড অটো-সিংক্রোনাইজেশন বন্ধ করা হয়েছে।', 'info');
         }
       };
     }
@@ -3156,9 +3536,14 @@ function bindEvents() {
     const pullBtn = document.getElementById('pull-supabase-btn');
     if (pullBtn) {
       pullBtn.onclick = () => {
-        if (confirm('আপনি কি সত্যিই ক্লাউড Supabase থেকে সমস্ত ডেটা নামিয়ে লোকাল ডেটা ওভাররাইট করতে চান? লোকাল ব্রাউজারের কোনো অসংরক্ষিত পরিবর্তন হারিয়ে যেতে পারে!')) {
-          pullFromSupabase();
-        }
+        showConfirm(
+          'আপনি কি সত্যিই ক্লাউড Supabase থেকে সমস্ত ডেটা নামিয়ে লোকাল ডেটা ওভাররাইট করতে চান? লোকাল ব্রাউজারের কোনো অসংরক্ষিত পরিবর্তন হারিয়ে যেতে পারে!',
+          () => {
+            pullFromSupabase();
+          },
+          null,
+          'ক্লাউড ডেটা নামান'
+        );
       };
     }
 
