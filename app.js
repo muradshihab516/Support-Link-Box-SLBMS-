@@ -1,943 +1,51 @@
 // Support Link Box - Core Administration Engine (Vanilla JS Edition)
 // High-performance client-side state machine with localStorage persistence
 
-const ADMIN_NAMES = {
-  'shihab@linkbox.com': 'Md Shihab Khan',
-  'mamun@linkbox.com': 'Mamun Aravi',
-  'shuvo@linkbox.com': 'Shuvo Sutradhar',
-  'shadat@linkbox.com': 'ShaDat Hossain',
-  'rubel@linkbox.com': 'Ariyan Ahmed Rubel',
-  'hanif@linkbox.com': 'Mohammad Abu Hanif'
+import { ADMIN_NAMES, STORAGE_KEYS, CONFIG } from './src/constants.js';
+import { getState, updateState, subscribeState } from './src/state.js';
+import { 
+  initializeDatabase, getMembers, saveMembers, getActivityLogs, saveActivityLogs, 
+  getAuditTrails, saveAuditTrails, getBadges, saveBadges, getCurrentAdmin, setCurrentAdmin,
+  cleanName, getNormalizedName, detectDateFromText, getYesterdayDateStr, getDiffDays, 
+  dataURLtoBlob, deduplicateMembers, registerSyncEnqueueHandler
+} from './src/database.js';
+import { 
+  getSupabase, setupSupabaseRealtime, initSupabaseConfig, testSupabaseConnection, 
+  performSmartSync, pullFromSupabase, silentPullFromSupabase, pushToSupabase, enqueueSyncJob
+} from './src/supabase.js';
+import { 
+  handleAddMember, handleBulkAddMembers, parseBulkActivityText, submitBulkActivity 
+} from './src/member.js';
+import { showToast } from './src/toast.js';
+import { showAlert, showConfirm } from './src/modal.js';
+
+// Global variables and exports
+export { 
+  ADMIN_NAMES, STORAGE_KEYS, CONFIG,
+  initializeDatabase, getMembers, saveMembers, getActivityLogs, saveActivityLogs, 
+  getAuditTrails, saveAuditTrails, getBadges, saveBadges, getCurrentAdmin, setCurrentAdmin,
+  cleanName, getNormalizedName, detectDateFromText, getYesterdayDateStr, getDiffDays, 
+  dataURLtoBlob, deduplicateMembers,
+  getSupabase, setupSupabaseRealtime, initSupabaseConfig, testSupabaseConnection, 
+  performSmartSync, pullFromSupabase, silentPullFromSupabase, pushToSupabase,
+  handleAddMember, handleBulkAddMembers, parseBulkActivityText, submitBulkActivity,
+  showToast, showAlert, showConfirm
 };
-
-const INITIAL_MEMBERS_DATA = [];
-
-function getPastDateString(daysAgo) {
-  const date = new Date();
-  date.setDate(date.getDate() - daysAgo);
-  return date.toISOString().split('T')[0];
-}
-
-const STORAGE_KEYS = {
-  MEMBERS: 'support_linkbox_members',
-  LOGS: 'support_linkbox_logs',
-  AUDIT: 'support_linkbox_audit',
-  BADGES: 'support_linkbox_badges',
-  CURRENT_ADMIN: 'support_linkbox_current_admin',
-  SUPABASE_URL: 'support_linkbox_supabase_url',
-  SUPABASE_KEY: 'support_linkbox_supabase_key',
-  SUPABASE_SYNC_ENABLED: 'support_linkbox_supabase_sync_enabled'
-};
-
-// Supabase client and sync helpers
-const _scU = 'https://qjqjyvxqeleasnodyexq.supabase.co';
-const _scK = 'sb_publishable_UpxW8v9KvV6AAeLlTNNTvA_basZF9bF';
 
 export function getHardcodedUrl() {
-  return _scU;
+  return 'https://qjqjyvxqeleasnodyexq.supabase.co';
 }
 
 export function getHardcodedKey() {
-  return _scK;
+  return 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFqcWp5dnhxZWxlYXNub2R5ZXhxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMzNDAwODEsImV4cCI6MjA5ODkxNjA4MX0.hnhNCssPzHqcZGb8f_Yl0l6LHYHX1TKGOQ_edjc2t18';
 }
 
-let cachedSupabaseClient = null;
-let realtimeChannel = null;
+// Inter-link database saves with our centralized Sync Queue
+registerSyncEnqueueHandler(enqueueSyncJob);
 
-export function getSupabase() {
-  if (cachedSupabaseClient) return cachedSupabaseClient;
+export let state = getState();
 
-  const url = localStorage.getItem(STORAGE_KEYS.SUPABASE_URL) || getHardcodedUrl();
-  const key = localStorage.getItem(STORAGE_KEYS.SUPABASE_KEY) || getHardcodedKey();
-
-  if (!url || !key) {
-    return null;
-  }
-  if (!window.supabase) {
-    console.warn('Supabase JS library CDN is not loaded yet.');
-    return null;
-  }
-  try {
-    cachedSupabaseClient = window.supabase.createClient(url, key);
-    return cachedSupabaseClient;
-  } catch (err) {
-    console.error('Failed to instantiate Supabase client:', err);
-    return null;
-  }
-}
-
-export function setupSupabaseRealtime() {
-  const client = getSupabase();
-  if (!client) return;
-  if (localStorage.getItem(STORAGE_KEYS.SUPABASE_SYNC_ENABLED) === 'false') return;
-
-  if (realtimeChannel) {
-    client.removeChannel(realtimeChannel);
-  }
-
-  console.log('Initializing Supabase Realtime Channels for Live Sync...');
-  realtimeChannel = client.channel('public-db-changes')
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'members' }, (payload) => {
-      console.log('Realtime change: members', payload);
-      handleRealtimeChange('members', payload);
-    })
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'activity_logs' }, (payload) => {
-      console.log('Realtime change: activity_logs', payload);
-      handleRealtimeChange('activity_logs', payload);
-    })
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'badges' }, (payload) => {
-      console.log('Realtime change: badges', payload);
-      handleRealtimeChange('badges', payload);
-    })
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'audit_trails' }, (payload) => {
-      console.log('Realtime change: audit_trails', payload);
-      handleRealtimeChange('audit_trails', payload);
-    })
-    .subscribe((status) => {
-      console.log('Supabase realtime connection status:', status);
-    });
-}
-
-function handleRealtimeChange(table, payload) {
-  const storageKeyMap = {
-    members: STORAGE_KEYS.MEMBERS,
-    activity_logs: STORAGE_KEYS.LOGS,
-    badges: STORAGE_KEYS.BADGES,
-    audit_trails: STORAGE_KEYS.AUDIT
-  };
-
-  const key = storageKeyMap[table];
-  if (!key) return;
-
-  try {
-    let localData = JSON.parse(localStorage.getItem(key) || '[]');
-    const { eventType, new: newRecord, old: oldRecord } = payload;
-
-    if (eventType === 'INSERT') {
-      if (!localData.some(item => item.id === newRecord.id)) {
-        localData.push(newRecord);
-        localStorage.setItem(key, JSON.stringify(localData));
-        triggerStateReload(table);
-      }
-    } else if (eventType === 'UPDATE') {
-      let updated = false;
-      localData = localData.map(item => {
-        if (item.id === newRecord.id) {
-          if (JSON.stringify(item) !== JSON.stringify(newRecord)) {
-            updated = true;
-            return newRecord;
-          }
-        }
-        return item;
-      });
-      if (updated) {
-        localStorage.setItem(key, JSON.stringify(localData));
-        triggerStateReload(table);
-      }
-    } else if (eventType === 'DELETE') {
-      const initialLength = localData.length;
-      localData = localData.filter(item => item.id !== oldRecord.id);
-      if (localData.length !== initialLength) {
-        localStorage.setItem(key, JSON.stringify(localData));
-        triggerStateReload(table);
-      }
-    }
-  } catch (err) {
-    console.error('Error handling realtime update:', err);
-  }
-}
-
-function triggerStateReload(table) {
-  console.log(`Realtime: Reloading state and UI for table ${table}`);
-  loadStateFromStorage();
-  updateState({});
-}
-
-export async function testSupabaseConnection() {
-  const client = getSupabase();
-  if (!client) {
-    updateState({ supabaseConnectionStatus: 'not_configured', supabaseConnectionError: '' });
-    return false;
-  }
-  updateState({ supabaseConnectionStatus: 'connecting', supabaseConnectionError: '' });
-  try {
-    // 1. Try a SELECT to verify connection and table existence
-    const { error: selectError } = await client.from('members').select('id').limit(1);
-    if (selectError) {
-      throw new Error(`Select Test Failed: ${selectError.message}`);
-    }
-
-    // 2. Try an INSERT to verify that RLS is not blocking client writes
-    const testId = `test-conn-${Date.now()}`;
-    const testMember = {
-      id: testId,
-      name: 'System Test Connection',
-      display_name: '@testconn',
-      status: 'active',
-      level: 'Bronze',
-      total_points: 0,
-      current_streak: 0,
-      longest_streak: 0,
-      total_active_days: 0,
-      last_active_date: null,
-      consecutive_inactive_days: 0,
-      notes: 'temp_test_connection_record'
-    };
-
-    const { error: insertError } = await client.from('members').insert([testMember]);
-    if (insertError) {
-      if (insertError.message.includes('row-level security') || insertError.code === '42501') {
-        throw new Error(`RLS_BLOCKED: ${insertError.message}`);
-      }
-      throw new Error(`Insert Test Failed: ${insertError.message}`);
-    }
-
-    // 3. Clean up the test row
-    await client.from('members').delete().eq('id', testId);
-
-    updateState({ supabaseConnectionStatus: 'connected', supabaseConnectionError: '' });
-    return true;
-  } catch (err) {
-    console.error('Supabase Connection Test Error:', err);
-    let friendlyError = err.message || 'Connection failed';
-    if (err instanceof TypeError || friendlyError.includes('Failed to fetch') || friendlyError.includes('fetch')) {
-      friendlyError = 'নেটওয়ার্ক সংযোগ ব্যর্থ হয়েছে! আপনার ইন্টারনেট অথবা প্রোভাইড করা Supabase URL ও Key সঠিক আছে কিনা চেক করুন।';
-    } else if (friendlyError.includes('RLS_BLOCKED') || friendlyError.includes('row-level security')) {
-      friendlyError = 'RLS_BLOCKED: Row-Level Security is active! RLS-এর কারণে ডাটা আপলোড ব্লক হয়ে আছে।';
-    }
-    updateState({ 
-      supabaseConnectionStatus: 'error', 
-      supabaseConnectionError: friendlyError 
-    });
-    return false;
-  }
-}
-
-export async function pushToSupabase() {
-  const client = getSupabase();
-  if (!client) {
-    showToast('অনুগ্রহ করে প্রথমে Supabase URL এবং Key সেট আপ করুন!', 'error');
-    return false;
-  }
-  updateState({ supabaseSyncing: true });
-  try {
-    const members = getMembers();
-    const logs = getActivityLogs();
-    const badges = getBadges();
-    const auditTrails = getAuditTrails();
-
-    // Sync Members
-    if (members.length > 0) {
-      const { error: mErr } = await client.from('members').upsert(members);
-      if (mErr) throw new Error(`Members Sync Error: ${mErr.message}`);
-    }
-    // Sync Logs
-    if (logs.length > 0) {
-      const { error: lErr } = await client.from('activity_logs').upsert(logs);
-      if (lErr) throw new Error(`Logs Sync Error: ${lErr.message}`);
-    }
-    // Sync Badges
-    if (badges.length > 0) {
-      const { error: bErr } = await client.from('badges').upsert(badges);
-      if (bErr) throw new Error(`Badges Sync Error: ${bErr.message}`);
-    }
-    // Sync Audit
-    if (auditTrails.length > 0) {
-      const { error: aErr } = await client.from('audit_trails').upsert(auditTrails);
-      if (aErr) throw new Error(`Audit Sync Error: ${aErr.message}`);
-    }
-
-    updateState({ supabaseSyncing: false, supabaseConnectionStatus: 'connected', supabaseConnectionError: '' });
-    showToast('অভিনন্দন! লোকাল ব্রাউজারের সমস্ত মেম্বার এবং অ্যাক্টিভিটি ডাটা সফলভাবে Supabase ক্লাউডে আপলোড (Push) করা হয়েছে!', 'success');
-    return true;
-  } catch (err) {
-    console.error(err);
-    updateState({ supabaseSyncing: false, supabaseConnectionStatus: 'error', supabaseConnectionError: err.message });
-    showToast(`ডাটা আপলোড করতে সমস্যা হয়েছে: ${err.message}`, 'error');
-    return false;
-  }
-}
-
-export async function performSmartSync(silent = true) {
-  const client = getSupabase();
-  if (!client) {
-    if (!silent) showToast('অনুগ্রহ করে প্রথমে Supabase URL এবং Key সেট আপ করুন!', 'error');
-    return false;
-  }
-  if (silent && localStorage.getItem(STORAGE_KEYS.SUPABASE_SYNC_ENABLED) === 'false') return false;
-
-  updateState({ supabaseSyncing: true });
-  try {
-    // 1. Fetch remote tables in parallel
-    let remoteM, remoteL, remoteB, remoteA;
-    try {
-      [remoteM, remoteL, remoteB, remoteA] = await Promise.all([
-        client.from('members').select('*'),
-        client.from('activity_logs').select('*'),
-        client.from('badges').select('*'),
-        client.from('audit_trails').select('*')
-      ]);
-    } catch (fetchErr) {
-      console.error("Network fetch to Supabase failed:", fetchErr);
-      throw new Error(`সার্ভারের সাথে সংযোগ ব্যর্থ হয়েছে! আপনার ইন্টারনেট কানেকশন অথবা প্রোভাইড করা Supabase URL ও Key সঠিক আছে কিনা যাচাই করুন।`);
-    }
-
-    // Check for any errors (e.g. RLS blocks)
-    if (remoteM.error) throw new Error(`Members: ${remoteM.error.message}`);
-    if (remoteL.error) throw new Error(`Activity Logs: ${remoteL.error.message}`);
-    if (remoteB.error) throw new Error(`Badges: ${remoteB.error.message}`);
-    if (remoteA.error) throw new Error(`Audit Trails: ${remoteA.error.message}`);
-
-    const rMembers = remoteM.data || [];
-    const rLogs = remoteL.data || [];
-    const rBadges = remoteB.data || [];
-    const rAudits = remoteA.data || [];
-
-    // Retrieve local data
-    const localMembers = JSON.parse(localStorage.getItem(STORAGE_KEYS.MEMBERS) || '[]');
-    const localLogs = JSON.parse(localStorage.getItem(STORAGE_KEYS.LOGS) || '[]');
-    const localBadges = JSON.parse(localStorage.getItem(STORAGE_KEYS.BADGES) || '[]');
-    const localAudits = JSON.parse(localStorage.getItem(STORAGE_KEYS.AUDIT) || '[]');
-
-    // CASE A: If remote is COMPLETELY empty, but we have local data, we populate remote with our local data!
-    const remoteIsEmpty = (rMembers.length === 0 && rLogs.length === 0 && rBadges.length === 0 && rAudits.length === 0);
-    const localHasData = (localMembers.length > 0 || localLogs.length > 0 || localBadges.length > 0 || localAudits.length > 1);
-
-    if (remoteIsEmpty && localHasData) {
-      console.log('Smart Sync: Remote database is empty. Auto-pushing local data to populate Cloud...');
-      
-      const upsertPromises = [];
-      if (localMembers.length > 0) upsertPromises.push(client.from('members').upsert(localMembers));
-      if (localLogs.length > 0) upsertPromises.push(client.from('activity_logs').upsert(localLogs));
-      if (localBadges.length > 0) upsertPromises.push(client.from('badges').upsert(localBadges));
-      if (localAudits.length > 0) upsertPromises.push(client.from('audit_trails').upsert(localAudits));
-
-      const results = await Promise.all(upsertPromises);
-      for (const res of results) {
-        if (res.error) throw new Error(`Auto-Populate Error: ${res.error.message}`);
-      }
-      
-      updateState({ supabaseSyncing: false, supabaseConnectionStatus: 'connected', supabaseConnectionError: '' });
-      if (!silent) {
-        showToast('সাফল্য! Supabase ক্লাউড ডাটাবেজ খালি থাকায়, লোকাল ডাটা সফলভাবে ক্লাউডে আপলোড করে ডাটাবেজ সাজানো হয়েছে!', 'success');
-      }
-      return true;
-    }
-
-    // CASE B: General non-destructive Bidirectional Merge
-    // 1. Merge Members (Key: id OR normalized name, Tie-breaker: updated_at)
-    const mergedMembersMap = new Map(); // id -> member
-    const nameToIdMap = new Map(); // normalized_name -> id
-
-    localMembers.forEach(m => {
-      if (m && m.id) {
-        const normName = getNormalizedName(m.name);
-        const existingId = nameToIdMap.get(normName);
-        if (existingId) {
-          const em = mergedMembersMap.get(existingId);
-          const emTime = em.updated_at ? new Date(em.updated_at).getTime() : 0;
-          const mTime = m.updated_at ? new Date(m.updated_at).getTime() : 0;
-          if (mTime > emTime) {
-            mergedMembersMap.delete(existingId);
-            mergedMembersMap.set(m.id, {
-              ...em,
-              ...m,
-              total_points: Math.max(em.total_points || 0, m.total_points || 0),
-              current_streak: Math.max(em.current_streak || 0, m.current_streak || 0),
-              longest_streak: Math.max(em.longest_streak || 0, m.longest_streak || 0),
-              total_active_days: Math.max(em.total_active_days || 0, m.total_active_days || 0)
-            });
-            nameToIdMap.set(normName, m.id);
-          } else {
-            mergedMembersMap.set(existingId, {
-              ...m,
-              ...em,
-              total_points: Math.max(em.total_points || 0, m.total_points || 0),
-              current_streak: Math.max(em.current_streak || 0, m.current_streak || 0),
-              longest_streak: Math.max(em.longest_streak || 0, m.longest_streak || 0),
-              total_active_days: Math.max(em.total_active_days || 0, m.total_active_days || 0)
-            });
-          }
-        } else {
-          mergedMembersMap.set(m.id, m);
-          nameToIdMap.set(normName, m.id);
-        }
-      }
-    });
-
-    rMembers.forEach(rm => {
-      if (rm && rm.id) {
-        const normName = getNormalizedName(rm.name);
-        const existingIdByName = nameToIdMap.get(normName);
-        const existingIdById = mergedMembersMap.has(rm.id) ? rm.id : null;
-        const existingId = existingIdByName || existingIdById;
-
-        if (!existingId) {
-          mergedMembersMap.set(rm.id, rm);
-          nameToIdMap.set(normName, rm.id);
-        } else {
-          const em = mergedMembersMap.get(existingId);
-          const emTime = em.updated_at ? new Date(em.updated_at).getTime() : 0;
-          const rmTime = rm.updated_at ? new Date(rm.updated_at).getTime() : 0;
-
-          if (rmTime > emTime) {
-            if (existingId !== rm.id) {
-              mergedMembersMap.delete(existingId);
-            }
-            mergedMembersMap.set(rm.id, {
-              ...em,
-              ...rm,
-              total_points: Math.max(em.total_points || 0, rm.total_points || 0),
-              current_streak: Math.max(em.current_streak || 0, rm.current_streak || 0),
-              longest_streak: Math.max(em.longest_streak || 0, rm.longest_streak || 0),
-              total_active_days: Math.max(em.total_active_days || 0, rm.total_active_days || 0)
-            });
-            nameToIdMap.set(normName, rm.id);
-          } else {
-            mergedMembersMap.set(existingId, {
-              ...rm,
-              ...em,
-              total_points: Math.max(em.total_points || 0, rm.total_points || 0),
-              current_streak: Math.max(em.current_streak || 0, rm.current_streak || 0),
-              longest_streak: Math.max(em.longest_streak || 0, rm.longest_streak || 0),
-              total_active_days: Math.max(em.total_active_days || 0, rm.total_active_days || 0)
-            });
-          }
-        }
-      }
-    });
-    const mergedMembersRaw = Array.from(mergedMembersMap.values());
-    const mergedMembers = deduplicateMembers(mergedMembersRaw, client);
-
-    // 2. Merge Activity Logs (Key: id)
-    const mergedLogsMap = new Map();
-    localLogs.forEach(l => { if (l && l.id) mergedLogsMap.set(l.id, l); });
-    rLogs.forEach(rl => { if (rl && rl.id) mergedLogsMap.set(rl.id, rl); });
-    const mergedLogs = Array.from(mergedLogsMap.values());
-
-    // 3. Merge Badges (Key: id)
-    const mergedBadgesMap = new Map();
-    localBadges.forEach(b => { if (b && b.id) mergedBadgesMap.set(b.id, b); });
-    rBadges.forEach(rb => { if (rb && rb.id) mergedBadgesMap.set(rb.id, rb); });
-    const mergedBadges = Array.from(mergedBadgesMap.values());
-
-    // 4. Merge Audit Trails (Key: id)
-    const mergedAuditsMap = new Map();
-    localAudits.forEach(a => { if (a && a.id) mergedAuditsMap.set(a.id, a); });
-    rAudits.forEach(ra => { if (ra && ra.id) mergedAuditsMap.set(ra.id, ra); });
-    const mergedAudits = Array.from(mergedAuditsMap.values());
-
-    // Save merged lists to local storage
-    localStorage.setItem(STORAGE_KEYS.MEMBERS, JSON.stringify(mergedMembers));
-    localStorage.setItem(STORAGE_KEYS.LOGS, JSON.stringify(mergedLogs));
-    localStorage.setItem(STORAGE_KEYS.BADGES, JSON.stringify(mergedBadges));
-    localStorage.setItem(STORAGE_KEYS.AUDIT, JSON.stringify(mergedAudits));
-
-    // Update global state variables
-    state.members = mergedMembers;
-    state.auditTrails = mergedAudits;
-
-    // Push the merged lists back to Supabase in background to ensure both client and server are fully aligned
-    const syncPromises = [];
-    if (mergedMembers.length > 0) syncPromises.push(client.from('members').upsert(mergedMembers));
-    if (mergedLogs.length > 0) syncPromises.push(client.from('activity_logs').upsert(mergedLogs));
-    if (mergedBadges.length > 0) syncPromises.push(client.from('badges').upsert(mergedBadges));
-    if (mergedAudits.length > 0) syncPromises.push(client.from('audit_trails').upsert(mergedAudits));
-
-    const syncResults = await Promise.all(syncPromises);
-    for (const res of syncResults) {
-      if (res.error) {
-        console.warn('Background alignment sync warning:', res.error.message);
-      }
-    }
-
-    loadStateFromStorage();
-    updateState({ supabaseSyncing: false, supabaseConnectionStatus: 'connected', supabaseConnectionError: '' });
-    
-    if (!silent) {
-      showToast('অভিনন্দন! লোকাল এবং ক্লাউড Supabase ডাটাবেজ সফলভাবে একত্রিত (Merged & Synced) করা হয়েছে!', 'success');
-    }
-    return true;
-  } catch (err) {
-    console.error('Smart sync failed:', err);
-    let friendlyError = err.message || 'Synchronization failed';
-    if (err instanceof TypeError || friendlyError.includes('Failed to fetch') || friendlyError.includes('fetch')) {
-      friendlyError = 'সার্ভারের সাথে সংযোগ ব্যর্থ হয়েছে! আপনার ইন্টারনেট অথবা প্রোভাইড করা Supabase URL ও Key সঠিক আছে কিনা যাচাই করুন।';
-    }
-    updateState({ 
-      supabaseSyncing: false, 
-      supabaseConnectionStatus: 'error', 
-      supabaseConnectionError: friendlyError 
-    });
-    if (!silent) {
-      showToast(`ডাটা সিঙ্ক করতে সমস্যা হয়েছে: ${friendlyError}`, 'error');
-    }
-    return false;
-  }
-}
-
-export async function pullFromSupabase() {
-  return performSmartSync(false);
-}
-
-export async function silentPullFromSupabase() {
-  return performSmartSync(true);
-}
-
-// Smart Diff Sync Helpers to make sure changes (updates, deletions, insertions) are written directly to Supabase
-export async function syncMembersDiff(newMembers) {
-  const client = getSupabase();
-  if (!client) return;
-  if (localStorage.getItem(STORAGE_KEYS.SUPABASE_SYNC_ENABLED) === 'false') return;
-
-  try {
-    const oldMembers = JSON.parse(localStorage.getItem(STORAGE_KEYS.MEMBERS) || '[]');
-    
-    // Find deleted members
-    const newMemberIds = new Set(newMembers.map(m => m.id));
-    const deletedMembers = oldMembers.filter(m => m && m.id && !newMemberIds.has(m.id));
-    
-    for (const dm of deletedMembers) {
-      console.log('Online Sync: Deleting member from Supabase:', dm.id, dm.name);
-      await client.from('members').delete().eq('id', dm.id);
-    }
-    
-    // Find new or modified members
-    const oldMemberMap = new Map(oldMembers.map(m => [m.id, m]));
-    const modifiedOrNewMembers = newMembers.filter(nm => {
-      const om = oldMemberMap.get(nm.id);
-      if (!om) return true; // New member
-      return (
-        nm.updated_at !== om.updated_at ||
-        nm.status !== om.status ||
-        nm.total_points !== om.total_points ||
-        nm.current_streak !== om.current_streak ||
-        nm.longest_streak !== om.longest_streak ||
-        nm.notes !== om.notes ||
-        nm.level !== om.level ||
-        nm.consecutive_inactive_days !== om.consecutive_inactive_days ||
-        nm.total_active_days !== om.total_active_days ||
-        nm.last_active_date !== om.last_active_date
-      );
-    });
-    
-    if (modifiedOrNewMembers.length > 0) {
-      console.log('Online Sync: Upserting modified/new members to Supabase:', modifiedOrNewMembers.length);
-      const { error } = await client.from('members').upsert(modifiedOrNewMembers);
-      if (error) throw error;
-    }
-  } catch (err) {
-    console.error('Error syncing members diff with Supabase:', err);
-  }
-}
-
-export async function syncLogsDiff(newLogs) {
-  const client = getSupabase();
-  if (!client) return;
-  if (localStorage.getItem(STORAGE_KEYS.SUPABASE_SYNC_ENABLED) === 'false') return;
-
-  try {
-    const oldLogs = JSON.parse(localStorage.getItem(STORAGE_KEYS.LOGS) || '[]');
-    const newLogIds = new Set(newLogs.map(l => l.id));
-    const deletedLogs = oldLogs.filter(l => l && l.id && !newLogIds.has(l.id));
-    
-    for (const dl of deletedLogs) {
-      console.log('Online Sync: Deleting log from Supabase:', dl.id);
-      await client.from('activity_logs').delete().eq('id', dl.id);
-    }
-    
-    const oldLogIds = new Set(oldLogs.map(l => l.id));
-    const addedLogs = newLogs.filter(nl => !oldLogIds.has(nl.id));
-    
-    if (addedLogs.length > 0) {
-      console.log('Online Sync: Upserting added logs to Supabase:', addedLogs.length);
-      const { error } = await client.from('activity_logs').upsert(addedLogs);
-      if (error) throw error;
-    }
-  } catch (err) {
-    console.error('Error syncing logs diff with Supabase:', err);
-  }
-}
-
-export async function syncBadgesDiff(newBadges) {
-  const client = getSupabase();
-  if (!client) return;
-  if (localStorage.getItem(STORAGE_KEYS.SUPABASE_SYNC_ENABLED) === 'false') return;
-
-  try {
-    const oldBadges = JSON.parse(localStorage.getItem(STORAGE_KEYS.BADGES) || '[]');
-    const newBadgeIds = new Set(newBadges.map(b => b.id));
-    const deletedBadges = oldBadges.filter(b => b && b.id && !newBadgeIds.has(b.id));
-    
-    for (const db of deletedBadges) {
-      console.log('Online Sync: Deleting badge from Supabase:', db.id);
-      await client.from('badges').delete().eq('id', db.id);
-    }
-    
-    const oldBadgeIds = new Set(oldBadges.map(b => b.id));
-    const addedBadges = newBadges.filter(nb => !oldBadgeIds.has(nb.id));
-    
-    if (addedBadges.length > 0) {
-      console.log('Online Sync: Upserting added badges to Supabase:', addedBadges.length);
-      const { error } = await client.from('badges').upsert(addedBadges);
-      if (error) throw error;
-    }
-  } catch (err) {
-    console.error('Error syncing badges diff with Supabase:', err);
-  }
-}
-
-export async function syncAuditTrailsDiff(newAudits) {
-  const client = getSupabase();
-  if (!client) return;
-  if (localStorage.getItem(STORAGE_KEYS.SUPABASE_SYNC_ENABLED) === 'false') return;
-
-  try {
-    const oldAudits = JSON.parse(localStorage.getItem(STORAGE_KEYS.AUDIT) || '[]');
-    const oldAuditIds = new Set(oldAudits.map(a => a.id));
-    const addedAudits = newAudits.filter(na => !oldAuditIds.has(na.id));
-    
-    if (addedAudits.length > 0) {
-      console.log('Online Sync: Upserting added audit trails to Supabase:', addedAudits.length);
-      const { error } = await client.from('audit_trails').upsert(addedAudits);
-      if (error) throw error;
-    }
-  } catch (err) {
-    console.error('Error syncing audits diff with Supabase:', err);
-  }
-}
-
-// Background auto-sync if enabled
-export async function syncSingleRecord(tableName, record) {
-  if (localStorage.getItem(STORAGE_KEYS.SUPABASE_SYNC_ENABLED) === 'false') return;
-  const client = getSupabase();
-  if (!client) return;
-  try {
-    await client.from(tableName).upsert([record]);
-  } catch (e) {
-    console.error(`Auto-sync failed for ${tableName}:`, e);
-  }
-}
-
-export async function syncMultipleRecords(tableName, records) {
-  if (localStorage.getItem(STORAGE_KEYS.SUPABASE_SYNC_ENABLED) === 'false') return;
-  const client = getSupabase();
-  if (!client) return;
-  try {
-    await client.from(tableName).upsert(records);
-  } catch (e) {
-    console.error(`Auto-sync failed for bulk ${tableName}:`, e);
-  }
-}
-
-// Database Initializer
-export function initializeDatabase() {
-  // Purge legacy demo data if detected to ensure a completely clean start
-  try {
-    const existingMembers = JSON.parse(localStorage.getItem(STORAGE_KEYS.MEMBERS) || '[]');
-    const hasLegacyDemo = Array.isArray(existingMembers) && existingMembers.some(m => 
-      m && (m.name === 'Rahi Ahmed Rabiul' || m.name === 'HM Jakaria Ahmed' || m.id === 'member-1')
-    );
-    if (hasLegacyDemo) {
-      localStorage.removeItem(STORAGE_KEYS.MEMBERS);
-      localStorage.removeItem(STORAGE_KEYS.LOGS);
-      localStorage.removeItem(STORAGE_KEYS.AUDIT);
-      localStorage.removeItem(STORAGE_KEYS.BADGES);
-      console.log('Legacy demo database detected and successfully purged.');
-    }
-  } catch (e) {
-    console.error('Error checking or purging legacy demo database:', e);
-  }
-
-  if (!localStorage.getItem(STORAGE_KEYS.MEMBERS)) {
-    localStorage.setItem(STORAGE_KEYS.MEMBERS, JSON.stringify([]));
-    localStorage.setItem(STORAGE_KEYS.LOGS, JSON.stringify([]));
-
-    // Generate audits
-    const audit = [{
-      id: 'audit-initial',
-      admin_email: 'shihab@linkbox.com',
-      admin_name: 'Md Shihab Khan',
-      action: 'INITIALIZE',
-      entity_type: 'DATABASE',
-      description: 'System database initialized with clean empty state.',
-      timestamp: new Date().toISOString()
-    }];
-    localStorage.setItem(STORAGE_KEYS.AUDIT, JSON.stringify(audit));
-    localStorage.setItem(STORAGE_KEYS.BADGES, JSON.stringify([]));
-  }
-}
-
-// Getters and Setters
-export function getMembers() {
-  initializeDatabase();
-  return JSON.parse(localStorage.getItem(STORAGE_KEYS.MEMBERS) || '[]');
-}
-
-export function saveMembers(members) {
-  syncMembersDiff(members);
-  localStorage.setItem(STORAGE_KEYS.MEMBERS, JSON.stringify(members));
-}
-
-export function getActivityLogs() {
-  return JSON.parse(localStorage.getItem(STORAGE_KEYS.LOGS) || '[]');
-}
-
-export function saveActivityLogs(logs) {
-  syncLogsDiff(logs);
-  localStorage.setItem(STORAGE_KEYS.LOGS, JSON.stringify(logs));
-}
-
-export function getAuditTrails() {
-  return JSON.parse(localStorage.getItem(STORAGE_KEYS.AUDIT) || '[]');
-}
-
-export function saveAuditTrails(trails) {
-  syncAuditTrailsDiff(trails);
-  localStorage.setItem(STORAGE_KEYS.AUDIT, JSON.stringify(trails));
-}
-
-export function getBadges() {
-  return JSON.parse(localStorage.getItem(STORAGE_KEYS.BADGES) || '[]');
-}
-
-export function saveBadges(badges) {
-  syncBadgesDiff(badges);
-  localStorage.setItem(STORAGE_KEYS.BADGES, JSON.stringify(badges));
-}
-
-export function getCurrentAdmin() {
-  return localStorage.getItem(STORAGE_KEYS.CURRENT_ADMIN) || 'shihab@linkbox.com';
-}
-
-export function setCurrentAdmin(email) {
-  localStorage.setItem(STORAGE_KEYS.CURRENT_ADMIN, email);
-}
-
-// Clean and parse names
-export function cleanName(name) {
-  return name.replace(/^@/, '').trim().replace(/\s+/g, ' ');
-}
-
-export function getNormalizedName(name) {
-  if (!name) return '';
-  return name.toLowerCase()
-    .replace(/^@/, '')
-    .replace(/[\s\u00A0\u200B\u200C\u200D\u200E\u200F\uFEFF]+/g, '')
-    .trim();
-}
-
-// Extract date in YYYY-MM-DD from raw text
-export function detectDateFromText(text) {
-  if (!text) return null;
-  const dateRegex = /(?:📅|তারিখ|tarikh)?\s*(?::|\s)\s*([0-3]?\d)[-\/\.]([0-1]?\d)[-\/\.](20\d{2}|\d{2})\b/i;
-  const match = text.match(dateRegex);
-  if (match) {
-    let d = parseInt(match[1], 10);
-    let m = parseInt(match[2], 10);
-    let y = parseInt(match[3], 10);
-    if (d > 0 && d <= 31 && m > 0 && m <= 12) {
-      if (y < 100) y = 2000 + y;
-      const paddedD = String(d).padStart(2, '0');
-      const paddedM = String(m).padStart(2, '0');
-      return `${y}-${paddedM}-${paddedD}`;
-    }
-  }
-
-  const simpleDateRegex = /\b([0-3]?\d)[-\/\.]([0-1]?\d)[-\/\.](20\d{2}|\d{2})\b/;
-  const simpleMatch = text.match(simpleDateRegex);
-  if (simpleMatch) {
-    let d = parseInt(simpleMatch[1], 10);
-    let m = parseInt(simpleMatch[2], 10);
-    let y = parseInt(simpleMatch[3], 10);
-    if (d > 0 && d <= 31 && m > 0 && m <= 12) {
-      if (y < 100) y = 2000 + y;
-      const paddedD = String(d).padStart(2, '0');
-      const paddedM = String(m).padStart(2, '0');
-      return `${y}-${paddedM}-${paddedD}`;
-    }
-  }
-  return null;
-}
-
-// Safely compute yesterday's date string in YYYY-MM-DD format (timezone-proof)
-export function getYesterdayDateStr(dateStr) {
-  const parts = dateStr.split('-');
-  const y = parseInt(parts[0], 10);
-  const m = parseInt(parts[1], 10) - 1;
-  const d = parseInt(parts[2], 10);
-  const dateObj = new Date(y, m, d - 1);
-  const ry = dateObj.getFullYear();
-  const rm = String(dateObj.getMonth() + 1).padStart(2, '0');
-  const rd = String(dateObj.getDate()).padStart(2, '0');
-  return `${ry}-${rm}-${rd}`;
-}
-
-// Safely compute day difference between two YYYY-MM-DD strings (timezone-proof)
-export function getDiffDays(dateStr1, dateStr2) {
-  const p1 = dateStr1.split('-').map(Number);
-  const p2 = dateStr2.split('-').map(Number);
-  const d1 = new Date(p1[0], p1[1] - 1, p1[2]);
-  const d2 = new Date(p2[0], p2[1] - 1, p2[2]);
-  const diffTime = Math.abs(d1.getTime() - d2.getTime());
-  return Math.round(diffTime / (1000 * 60 * 60 * 24));
-}
-
-export function dataURLtoBlob(dataurl) {
-  try {
-    const arr = dataurl.split(',');
-    const mime = arr[0].match(/:(.*?);/)[1];
-    const bstr = atob(arr[1]);
-    let n = bstr.length;
-    const u8arr = new Uint8Array(n);
-    while (n--) {
-      u8arr[n] = bstr.charCodeAt(n);
-    }
-    return new Blob([u8arr], { type: mime });
-  } catch (e) {
-    console.error('Failed to convert data URL to Blob:', e);
-    return null;
-  }
-}
-
-export function deduplicateMembers(members, client = null) {
-  const uniqueMembers = [];
-  const seenNormalizedNames = new Set();
-  const duplicatesToDelete = [];
-
-  // Sort members so that the one with higher points or more recent update comes first
-  const sorted = [...members].sort((a, b) => {
-    const pointsDiff = (b.total_points || 0) - (a.total_points || 0);
-    if (pointsDiff !== 0) return pointsDiff;
-    const aTime = a.updated_at ? new Date(a.updated_at).getTime() : 0;
-    const bTime = b.updated_at ? new Date(b.updated_at).getTime() : 0;
-    return bTime - aTime;
-  });
-
-  sorted.forEach(m => {
-    const norm = getNormalizedName(m.name);
-    if (!norm) return;
-    if (seenNormalizedNames.has(norm)) {
-      duplicatesToDelete.push(m);
-    } else {
-      seenNormalizedNames.add(norm);
-      uniqueMembers.push(m);
-    }
-  });
-
-  if (duplicatesToDelete.length > 0) {
-    console.log(`Deduplicating: found ${duplicatesToDelete.length} duplicate names to clean up.`, duplicatesToDelete.map(d => d.name));
-    
-    // For each duplicate, map its ID to the surviving ID
-    const idMap = new Map(); // deleted_id -> surviving_id
-    sorted.forEach(m => {
-      const norm = getNormalizedName(m.name);
-      const survivor = uniqueMembers.find(u => getNormalizedName(u.name) === norm);
-      if (survivor && survivor.id !== m.id) {
-        idMap.set(m.id, survivor.id);
-      }
-    });
-
-    // Update local logs and badges
-    const logs = JSON.parse(localStorage.getItem(STORAGE_KEYS.LOGS) || '[]');
-    let logsUpdated = false;
-    logs.forEach(l => {
-      if (idMap.has(l.member_id)) {
-        l.member_id = idMap.get(l.member_id);
-        l.updated_at = new Date().toISOString();
-        logsUpdated = true;
-      }
-    });
-    if (logsUpdated) {
-      localStorage.setItem(STORAGE_KEYS.LOGS, JSON.stringify(logs));
-    }
-
-    const badges = JSON.parse(localStorage.getItem(STORAGE_KEYS.BADGES) || '[]');
-    let badgesUpdated = false;
-    badges.forEach(b => {
-      if (idMap.has(b.member_id)) {
-        b.member_id = idMap.get(b.member_id);
-        b.updated_at = new Date().toISOString();
-        badgesUpdated = true;
-      }
-    });
-    if (badgesUpdated) {
-      localStorage.setItem(STORAGE_KEYS.BADGES, JSON.stringify(badges));
-    }
-
-    // Remote delete and update
-    if (client) {
-      const ids = duplicatesToDelete.map(d => d.id);
-      client.from('members').delete().in('id', ids).then(({ error }) => {
-        if (error) console.error('Failed to remote-delete duplicate members:', error);
-      });
-
-      const logsToUpsert = logs.filter(l => idMap.has(l.member_id));
-      if (logsToUpsert.length > 0) {
-        client.from('activity_logs').upsert(logsToUpsert).then(({ error }) => {
-          if (error) console.error('Failed to align remote logs after deduplication:', error);
-        });
-      }
-
-      const badgesToUpsert = badges.filter(b => idMap.has(b.member_id));
-      if (badgesToUpsert.length > 0) {
-        client.from('badges').upsert(badgesToUpsert).then(({ error }) => {
-          if (error) console.error('Failed to align remote badges after deduplication:', error);
-        });
-      }
-    }
-  }
-
-  return uniqueMembers;
-}
-
-// PWA Installer global state
-let deferredPrompt = null;
-
-// State Machine
-let state = {
-  currentTab: 'leaderboards',
-  isFabOpen: false,
-  isHeaderMenuOpen: false,
-  currentAdminEmail: getCurrentAdmin(),
-  members: [],
-  auditTrails: [],
-  searchQueryMembers: '',
-  memberFilterStatus: 'all',
-  editingNotesMemberId: null,
-  editingNotesText: '',
-  bulkInputText: '',
-  bulkInputDate: new Date().toISOString().split('T')[0],
-  noticeFilterDays: 3,
-  copiedNotice: false,
-  leaderboardSearchQuery: '',
-  leaderboardActiveThreshold: 1,
-  leaderboardInactiveThreshold: 3,
-  reportSearchQuery: '',
-  reportSelectedMemberId: '',
-  isDownloadingReport: false,
-  copiedSQL: false,
-  copiedJS: false,
-  generatedPngUrl: '',
-  generatedPngMemberName: '',
-  showPwaInstallBanner: false,
-  showRegisterModal: false,
-  supabaseUrl: localStorage.getItem('support_linkbox_supabase_url') || getHardcodedUrl(),
-  supabaseKey: localStorage.getItem('support_linkbox_supabase_key') || getHardcodedKey(),
-  supabaseSyncEnabled: localStorage.getItem('support_linkbox_supabase_sync_enabled') !== 'false',
-  supabaseConnectionStatus: 'idle',
-  supabaseConnectionError: '',
-  supabaseSyncing: false,
-  loadedFromEnv: !localStorage.getItem('support_linkbox_supabase_url') && !localStorage.getItem('support_linkbox_supabase_key'),
-  showUrlInput: false,
-  showKeyInput: false,
-  uncheckedUnregisteredNames: [],
-  developerUnlocked: typeof sessionStorage !== 'undefined' && sessionStorage.getItem('developer_unlocked') === 'true',
-  toast: null,
-  confirmModal: null
-};
-
-// Helper to wait for Supabase CDN script to load
+// Wait for Supabase CDN script to load
 export async function ensureSupabaseLoaded(maxRetries = 20) {
   for (let i = 0; i < maxRetries; i++) {
     if (window.supabase) {
@@ -948,63 +56,8 @@ export async function ensureSupabaseLoaded(maxRetries = 20) {
   return false;
 }
 
-// Auto-extract URL query params and secrets
-export function initSupabaseConfig() {
-  const hcUrl = getHardcodedUrl();
-  const hcKey = getHardcodedKey();
-
-  // If there are valid, non-empty hardcoded credentials, ensure they take absolute priority 
-  // and overwrite any old, stale, or empty values currently residing in the browser's local storage.
-  if (hcUrl && hcUrl.trim() !== '' && hcKey && hcKey.trim() !== '') {
-    const currentStoredUrl = localStorage.getItem(STORAGE_KEYS.SUPABASE_URL);
-    const currentStoredKey = localStorage.getItem(STORAGE_KEYS.SUPABASE_KEY);
-    
-    if (currentStoredUrl !== hcUrl || currentStoredKey !== hcKey) {
-      console.log('Synchronizing new hardcoded credentials to local storage:', hcUrl);
-      localStorage.setItem(STORAGE_KEYS.SUPABASE_URL, hcUrl);
-      localStorage.setItem(STORAGE_KEYS.SUPABASE_KEY, hcKey);
-      cachedSupabaseClient = null; // Invalidate cached client
-    }
-    if (localStorage.getItem(STORAGE_KEYS.SUPABASE_SYNC_ENABLED) === 'false') {
-      localStorage.setItem(STORAGE_KEYS.SUPABASE_SYNC_ENABLED, 'true');
-    }
-  }
-
-  try {
-    const urlObj = new URL(window.location.href);
-    const urlParam = urlObj.searchParams.get('supabase_url') || urlObj.searchParams.get('url');
-    const keyParam = urlObj.searchParams.get('supabase_key') || urlObj.searchParams.get('key');
-    
-    let updated = false;
-    if (urlParam) {
-      localStorage.setItem(STORAGE_KEYS.SUPABASE_URL, urlParam);
-      updated = true;
-    }
-    if (keyParam) {
-      localStorage.setItem(STORAGE_KEYS.SUPABASE_KEY, keyParam);
-      updated = true;
-    }
-    
-    if (updated) {
-      // Clean query params to hide credentials from address bar immediately
-      urlObj.searchParams.delete('supabase_url');
-      urlObj.searchParams.delete('supabase_key');
-      urlObj.searchParams.delete('url');
-      urlObj.searchParams.delete('key');
-      window.history.replaceState({}, document.title, urlObj.pathname + urlObj.search);
-      cachedSupabaseClient = null;
-    }
-  } catch (e) {
-    console.error('Error parsing URL query parameters for Supabase configuration:', e);
-  }
-
-  state.supabaseUrl = localStorage.getItem(STORAGE_KEYS.SUPABASE_URL) || getHardcodedUrl();
-  state.supabaseKey = localStorage.getItem(STORAGE_KEYS.SUPABASE_KEY) || getHardcodedKey();
-  state.loadedFromEnv = !localStorage.getItem(STORAGE_KEYS.SUPABASE_URL) && !localStorage.getItem(STORAGE_KEYS.SUPABASE_KEY);
-}
-
-// Load initial database records into State
-function loadStateFromStorage() {
+// Load initial database records and configuration
+export function loadStateFromStorage() {
   initializeDatabase();
   initSupabaseConfig();
   
@@ -1012,15 +65,17 @@ function loadStateFromStorage() {
   const supabaseClient = getSupabase();
   const cleanedMembers = deduplicateMembers(rawLocalMembers, supabaseClient);
   if (cleanedMembers.length !== rawLocalMembers.length) {
-    localStorage.setItem(STORAGE_KEYS.MEMBERS, JSON.stringify(cleanedMembers));
+    saveMembers(cleanedMembers, true);
   }
   
-  state.members = cleanedMembers;
-  state.auditTrails = getAuditTrails();
-  state.currentAdminEmail = getCurrentAdmin();
+  updateState({
+    members: cleanedMembers,
+    auditTrails: getAuditTrails(),
+    currentAdminEmail: getCurrentAdmin()
+  });
   
-  if (state.supabaseUrl && state.supabaseKey) {
-    // Non-blocking background check
+  const currentState = getState();
+  if (currentState.supabaseUrl && currentState.supabaseKey) {
     setTimeout(() => {
       ensureSupabaseLoaded().then(loaded => {
         if (loaded) {
@@ -1031,386 +86,34 @@ function loadStateFromStorage() {
   }
 }
 
-// Custom Toast System
-export function showToast(message, type = 'success') {
-  state.toast = { message, type };
+// PWA Installer global state
+let deferredPrompt = null;
+
+// Parse helper
+function getPastDateString(daysAgo) {
+  const date = new Date();
+  date.setDate(date.getDate() - daysAgo);
+  return date.toISOString().split('T')[0];
+}
+
+// Automatically subscribe the UI render loop to reactive state modifications
+subscribeState((newState) => {
+  state = newState;
+  window.state = newState;
   render();
-  setTimeout(() => {
-    if (state.toast && state.toast.message === message) {
-      state.toast = null;
-      render();
-    }
-  }, 4000);
-}
-
-// Custom Modal Alert & Confirmation Dialog System
-export function showAlert(message, title = 'সতর্কতা', onOk = null) {
-  updateState({
-    confirmModal: {
-      title,
-      message,
-      onConfirm: () => {
-        updateState({ confirmModal: null });
-        if (onOk) onOk();
-      },
-      onCancel: () => {
-        updateState({ confirmModal: null });
-        if (onOk) onOk();
-      },
-      confirmText: 'ঠিক আছে',
-      cancelText: '' // Empty means alert modal (no cancel button)
-    }
-  });
-}
-
-export function showConfirm(message, onConfirm, onCancel = null, title = 'অনুমোদন দিন', confirmText = 'নিশ্চিত করুন', cancelText = 'বাতিল') {
-  updateState({
-    confirmModal: {
-      title,
-      message,
-      onConfirm: () => {
-        updateState({ confirmModal: null });
-        if (onConfirm) onConfirm();
-      },
-      onCancel: () => {
-        updateState({ confirmModal: null });
-        if (onCancel) onCancel();
-      },
-      confirmText,
-      cancelText
-    }
-  });
-}
-
-// Unified State Mutator & Render Trigger
-function updateState(newState) {
-  state = { ...state, ...newState };
-  render();
-}
-
-// Add Member Business Logic
-function handleAddMember(rawName, notes = '') {
-  const cleaned = cleanName(rawName);
-  if (!cleaned) {
-    showToast('মেম্বার এর নাম ফাকা হতে পারে না!', 'error');
-    return false;
-  }
-
-  const members = getMembers();
-  const duplicate = members.find(m => getNormalizedName(m.name) === getNormalizedName(cleaned));
-  if (duplicate) {
-    showAlert(`এই নামের অন্য লোক আছে! অনুগ্রহ করে নামের শেষে '1', '2' বা 'A', 'B' কিছু লাগিয়ে দিন (যেমন: ${cleaned} A)`, 'ডুপ্লিকেট মেম্বার');
-    return false;
-  }
-
-  const maxMemberNum = members.reduce((max, m) => m.member_number > max ? m.member_number : max, 0);
-  const nextMemberNum = maxMemberNum + 1;
-
-  const newMember = {
-    id: `member-${Math.random().toString(36).substr(2, 9)}`,
-    name: cleaned,
-    display_name: `@${cleaned.replace(/\s+/g, '')}`,
-    member_number: nextMemberNum,
-    status: 'active',
-    level: 'Bronze',
-    total_points: 0,
-    current_streak: 0,
-    longest_streak: 0,
-    total_active_days: 0,
-    last_active_date: null,
-    consecutive_inactive_days: 0,
-    notes,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString()
-  };
-
-  members.push(newMember);
-  saveMembers(members);
-
-  // Add audit trail
-  const adminName = ADMIN_NAMES[state.currentAdminEmail] || 'Unknown Admin';
-  const auditTrails = getAuditTrails();
-  auditTrails.unshift({
-    id: `audit-${Date.now()}`,
-    admin_email: state.currentAdminEmail,
-    admin_name: adminName,
-    action: 'ADD_MEMBER',
-    entity_type: 'MEMBER',
-    description: `Registered new member: ${cleaned} (No. ${nextMemberNum})`,
-    timestamp: new Date().toISOString()
-  });
-  saveAuditTrails(auditTrails);
-
-  loadStateFromStorage();
-  updateState({});
-  return true;
-}
-
-// Bulk Add Members Business Logic
-function handleBulkAddMembers(namesList) {
-  if (!Array.isArray(namesList) || namesList.length === 0) {
-    return { successCount: 0, duplicateNames: [], totalAttempted: 0 };
-  }
-  
-  const members = getMembers();
-  const auditTrails = getAuditTrails();
-  const adminName = ADMIN_NAMES[state.currentAdminEmail] || 'Unknown Admin';
-  let successCount = 0;
-  const duplicateNames = [];
-  
-  let maxMemberNum = members.reduce((max, m) => m.member_number > max ? m.member_number : max, 0);
-  
-  namesList.forEach(rawName => {
-    const cleaned = cleanName(rawName);
-    if (!cleaned) return;
-    
-    const duplicate = members.find(m => getNormalizedName(m.name) === getNormalizedName(cleaned));
-    if (duplicate) {
-      if (!duplicateNames.includes(cleaned)) {
-        duplicateNames.push(cleaned);
-      }
-      return;
-    }
-    
-    maxMemberNum++;
-    const newMember = {
-      id: `member-${Math.random().toString(36).substr(2, 9)}`,
-      name: cleaned,
-      display_name: `@${cleaned.replace(/\s+/g, '')}`,
-      member_number: maxMemberNum,
-      status: 'active',
-      level: 'Bronze',
-      total_points: 0,
-      current_streak: 0,
-      longest_streak: 0,
-      total_active_days: 0,
-      last_active_date: null,
-      consecutive_inactive_days: 0,
-      notes: '',
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    };
-    
-    members.push(newMember);
-    
-    auditTrails.unshift({
-      id: `audit-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-      admin_email: state.currentAdminEmail,
-      admin_name: adminName,
-      action: 'ADD_MEMBER',
-      entity_type: 'MEMBER',
-      description: `Registered new member via Bulk: ${cleaned} (No. ${maxMemberNum})`,
-      timestamp: new Date().toISOString()
-    });
-    
-    successCount++;
-  });
-  
-  if (successCount > 0) {
-    saveMembers(members);
-    saveAuditTrails(auditTrails);
-    loadStateFromStorage();
-    updateState({});
-  }
-  
-  return { successCount, duplicateNames, totalAttempted: namesList.length };
-}
-
-// Bulk text mentions extractor
-function parseBulkActivityText(text) {
-  if (!text) return { parsedNames: [], matchedMembers: [], unregisteredNames: [] };
-
-  const parsedNames = [];
-  const regex = /@([^\n\r0-9📅📆✅👇🅾️➤〰️💤⚠️\r\n\t(@]+)/g;
-  let match;
-  while ((match = regex.exec(text)) !== null) {
-    const extracted = match[1].trim();
-    if (extracted && extracted.length > 1) {
-      const cleaned = extracted.replace(/^[➤\s]+/, '').trim();
-      if (cleaned && !parsedNames.includes(cleaned)) {
-        parsedNames.push(cleaned);
-      }
-    }
-  }
-
-  // Fallback split manually if regex matched nothing
-  if (parsedNames.length === 0) {
-    const parts = text.split('@');
-    for (let i = 1; i < parts.length; i++) {
-      const part = parts[i];
-      const namePartMatch = part.match(/^([^0-9📅📆✅👇🅾️➤〰️💤⚠️\r\n\t(@]+)/);
-      if (namePartMatch) {
-        const cleaned = namePartMatch[1].trim();
-        if (cleaned && cleaned.length > 1 && !parsedNames.includes(cleaned)) {
-          parsedNames.push(cleaned);
-        }
-      }
-    }
-  }
-
-  const members = getMembers();
-  const matchedMembers = [];
-  const unregisteredNames = [];
-
-  parsedNames.forEach(rawName => {
-    const cleaned = cleanName(rawName);
-    const match = members.find(m => {
-      const normMName = getNormalizedName(m.name);
-      const normMDisplayName = getNormalizedName(m.display_name || '');
-      const normCleaned = getNormalizedName(cleaned);
-      return normMName === normCleaned || normMDisplayName === normCleaned;
-    });
-
-    if (match) {
-      if (!matchedMembers.some(m => m.id === match.id)) {
-        matchedMembers.push(match);
-      }
-    } else {
-      if (!unregisteredNames.includes(cleaned)) {
-        unregisteredNames.push(cleaned);
-      }
-    }
-  });
-
-  return { parsedNames, matchedMembers, unregisteredNames };
-}
-
-// Save Daily Submissions
-function submitBulkActivity(dateStr, activeMemberIds) {
-  const members = getMembers();
-  const logs = getActivityLogs();
-  
-  // Prevent duplicate submissions on the same date
-  const duplicateLog = logs.find(l => l.activity_date === dateStr && l.is_active);
-  if (duplicateLog) {
-    showAlert(`এই তারিখে (${dateStr}) ইতিমধ্যে এক্টিভিটি লিস্ট সাবমিট করা হয়েছে! একই তারিখে একাধিক লিস্ট সাবমিট করা যাবে না।`, 'ডুপ্লিকেট তারিখ');
-    return;
-  }
-
-  const badges = getBadges();
-  const auditTrails = getAuditTrails();
-  const adminName = ADMIN_NAMES[state.currentAdminEmail] || 'Unknown Admin';
-
-  const yesterdayStr = getYesterdayDateStr(dateStr);
-
-  let loggedCount = 0;
-
-  const updatedMembers = members.map(member => {
-    const isActive = activeMemberIds.includes(member.id);
-
-    if (isActive) {
-      logs.push({
-        id: `log-${member.id}-${dateStr}-${Date.now()}`,
-        member_id: member.id,
-        activity_date: dateStr,
-        is_active: true,
-        points_earned: 10,
-        submitted_by: state.currentAdminEmail,
-        created_at: new Date().toISOString()
-      });
-      loggedCount++;
-
-      let currentStreak = member.current_streak;
-      if (member.last_active_date === yesterdayStr) {
-        currentStreak += 1;
-      } else if (member.last_active_date === dateStr) {
-        // Active today, streak stays
-      } else {
-        currentStreak = 1;
-      }
-
-      const longestStreak = Math.max(member.longest_streak, currentStreak);
-      const totalPoints = member.total_points + 10;
-      const totalActiveDays = member.total_active_days + 1;
-
-      let level = 'Bronze';
-      if (totalPoints >= 600) level = 'Diamond';
-      else if (totalPoints >= 300) level = 'Gold';
-      else if (totalPoints >= 100) level = 'Silver';
-
-      const status = 'active';
-
-      // Badge checks
-      if (currentStreak === 3 && !badges.some(b => b.member_id === member.id && b.badge_type === 'streak_3')) {
-        badges.push({ id: `badge-${member.id}-streak3-${Date.now()}`, member_id: member.id, badge_type: 'streak_3', badge_name: '🥉 3-Day Streak Warrior', earned_at: new Date().toISOString() });
-      }
-      if (currentStreak === 7 && !badges.some(b => b.member_id === member.id && b.badge_type === 'streak_7')) {
-        badges.push({ id: `badge-${member.id}-streak7-${Date.now()}`, member_id: member.id, badge_type: 'streak_7', badge_name: '🥈 7-Day Streak Master', earned_at: new Date().toISOString() });
-      }
-      if (currentStreak === 15 && !badges.some(b => b.member_id === member.id && b.badge_type === 'streak_15')) {
-        badges.push({ id: `badge-${member.id}-streak15-${Date.now()}`, member_id: member.id, badge_type: 'streak_15', badge_name: '👑 15-Day Ultimate Streak', earned_at: new Date().toISOString() });
-      }
-      if (totalPoints >= 100 && !badges.some(b => b.member_id === member.id && b.badge_type === 'silver_points')) {
-        badges.push({ id: `badge-${member.id}-silver-${Date.now()}`, member_id: member.id, badge_type: 'silver_points', badge_name: '⭐ Silver Contributor', earned_at: new Date().toISOString() });
-      }
-      if (totalPoints >= 300 && !badges.some(b => b.member_id === member.id && b.badge_type === 'gold_points')) {
-        badges.push({ id: `badge-${member.id}-gold-${Date.now()}`, member_id: member.id, badge_type: 'gold_points', badge_name: '🏆 Gold Ambassador', earned_at: new Date().toISOString() });
-      }
-
-      return {
-        ...member,
-        total_points: totalPoints,
-        current_streak: currentStreak,
-        longest_streak: longestStreak,
-        total_active_days: totalActiveDays,
-        last_active_date: dateStr,
-        consecutive_inactive_days: 0,
-        status,
-        level,
-        updated_at: new Date().toISOString()
-      };
-    } else {
-      let inactiveDays = member.consecutive_inactive_days;
-      if (member.last_active_date) {
-        inactiveDays = getDiffDays(dateStr, member.last_active_date);
-      } else {
-        inactiveDays += 1;
-      }
-
-      let currentStreak = member.current_streak;
-      if (inactiveDays > 1) currentStreak = 0;
-
-      let status = member.status;
-      if (inactiveDays >= 12) {
-        status = 'inactive';
-      } else if (inactiveDays >= 7) {
-        status = 'warning';
-      }
-
-      return {
-        ...member,
-        current_streak: currentStreak,
-        consecutive_inactive_days: inactiveDays,
-        status,
-        updated_at: new Date().toISOString()
-      };
-    }
-  });
-
-  saveMembers(updatedMembers);
-  saveActivityLogs(logs);
-  saveBadges(badges);
-
-  auditTrails.unshift({
-    id: `audit-${Date.now()}`,
-    admin_email: state.currentAdminEmail,
-    admin_name: adminName,
-    action: 'SUBMIT_BULK_ACTIVITY',
-    entity_type: 'ACTIVITY',
-    description: `Processed activity for ${dateStr}. Marked ${activeMemberIds.length} active out of ${members.length} members.`,
-    timestamp: new Date().toISOString()
-  });
-  saveAuditTrails(auditTrails);
-
-  loadStateFromStorage();
-  updateState({ bulkInputText: '', uncheckedUnregisteredNames: [] });
-  showToast('মেম্বার অ্যাক্টিভিটি এবং ডেইলি লিংক সফলভাবে সেভ করা হয়েছে!', 'success');
-}
+});
 
 // Global Render loop matching current Tab
 function render() {
   const container = document.getElementById('app');
   if (!container) return;
+
+  if (!state.isLoggedIn) {
+    container.innerHTML = renderLoginPage();
+    lucide.createIcons();
+    bindLoginEvents();
+    return;
+  }
 
   // Active overview statistics calculations
   const totalCount = state.members.length;
@@ -1435,15 +138,16 @@ function render() {
           </div>
         </div>
 
-        <!-- Admin Profile Switcher dropdown -->
-        <div class="flex items-center gap-2">
-          <span class="text-[10px] text-slate-500 uppercase font-black tracking-wider hidden md:inline">Active Admin Panel</span>
-          <select id="admin-selector" class="bg-slate-950 border border-slate-800 text-slate-300 px-3 py-1.5 rounded-xl text-xs font-semibold focus:outline-none focus:border-indigo-500 cursor-pointer">
-            ${Object.entries(ADMIN_NAMES).map(([email, name]) => `
-              <option value="${email}" ${state.currentAdminEmail === email ? 'selected' : ''}>${name}</option>
-            `).join('')}
-            <option value="custom">+ Add New Admin</option>
-          </select>
+        <!-- Admin Profile Info and Log Out -->
+        <div class="flex items-center gap-3">
+          <div class="hidden sm:flex flex-col text-right">
+            <span class="text-xs font-bold text-slate-200">${ADMIN_NAMES[state.currentAdminEmail] || state.currentAdminEmail}</span>
+            <span class="text-[9px] text-slate-500 font-medium">${state.currentAdminEmail}</span>
+          </div>
+          <button id="logout-btn" class="p-2 rounded-xl border border-rose-500/20 bg-rose-950/10 hover:border-rose-500 hover:bg-rose-900/20 text-rose-400 transition flex items-center justify-center cursor-pointer gap-1.5 px-3" title="Log Out">
+            <i data-lucide="log-out" class="w-3.5 h-3.5"></i>
+            <span class="text-xs font-bold hidden sm:inline">লগআউট</span>
+          </button>
           <button data-tab="supabase" class="tab-btn p-2 rounded-xl border border-slate-800 bg-slate-950/95 hover:border-indigo-500 hover:bg-slate-900 transition flex items-center justify-center relative cursor-pointer group ${
             state.currentTab === 'supabase' ? 'border-indigo-500 bg-indigo-950/20 text-indigo-400' : 'text-slate-400'
           }" title="Supabase Database Settings">
@@ -1939,6 +643,54 @@ function renderTabContent(totalCount, activeCount, inactiveCount, diamondCount) 
             </div>
           </div>
 
+          ${isError ? `
+            <!-- Detailed Error & Solution Banner -->
+            <div class="bg-rose-950/40 border border-rose-850 rounded-2xl p-5 sm:p-6 space-y-4">
+              <div class="flex items-start gap-3 text-rose-400">
+                <i data-lucide="alert-triangle" class="w-6 h-6 shrink-0 mt-0.5 text-rose-400"></i>
+                <div class="space-y-1">
+                  <h4 class="font-bold text-sm text-rose-200">Supabase সংযোগ বা কনফিগারেশন ত্রুটি ধরা পড়েছে!</h4>
+                  <p class="text-xs text-rose-300">নিচে দেয়া সহজ ধাপগুলো অনুসরণ করলে এখনই এটি সফলভাবে কানেক্ট হয়ে যাবে।</p>
+                </div>
+              </div>
+              
+              <div class="bg-slate-950 p-4 rounded-xl border border-rose-950/60 text-rose-300 space-y-2">
+                <p class="text-[11px] font-black uppercase tracking-wider text-rose-400 flex items-center gap-1.5">
+                  <span class="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
+                  মূল ত্রুটি বার্তা (Error Message):
+                </p>
+                <code class="text-[11px] font-mono break-all block select-all leading-normal bg-slate-950 border border-slate-900 px-3 py-2 rounded-lg text-rose-300">${state.supabaseConnectionError}</code>
+              </div>
+
+              <div class="space-y-3 bg-slate-900/50 p-5 rounded-xl border border-slate-800 text-xs text-slate-300">
+                <p class="font-bold text-slate-200 flex items-center gap-1.5 text-xs">
+                  <i data-lucide="help-circle" class="w-4 h-4 text-indigo-400"></i>
+                  কীভাবে এটি ঠিক করবেন? (Step-by-Step Solution):
+                </p>
+                <ol class="space-y-3 pl-5 list-decimal text-slate-300 leading-relaxed">
+                  <li>
+                    ডানপাশের <strong class="text-emerald-400">"Copy SQL Script"</strong> বাটনে ক্লিক করে পুরো SQL কোডটি কপি করুন।
+                  </li>
+                  <li>
+                    আপনার <a href="https://supabase.com/dashboard" target="_blank" class="text-indigo-400 hover:underline font-bold inline-flex items-center gap-1">Supabase Dashboard <i data-lucide="external-link" class="w-3.5 h-3.5"></i></a> এ লগইন করে আপনার এই প্রোজেক্টটি ওপেন করুন।
+                  </li>
+                  <li>
+                    বামপাশের মেনুবার থেকে <strong class="text-slate-200">SQL Editor</strong> অপশনে ক্লিক করুন।
+                  </li>
+                  <li>
+                    সেখানে <strong class="text-slate-200">"New query"</strong> বাটনে ক্লিক করে একটি নতুন কোড বক্স ক্রিয়েট করুন।
+                  </li>
+                  <li>
+                    কপি করা পুরো SQL কোডটি সেখানে পেস্ট করুন এবং ডানপাশে নিচে থাকা <strong class="text-emerald-400">"Run"</strong> বাটনে ক্লিক করুন। <span class="text-slate-400">(এটি ডাটাবেজের প্রয়োজনীয় ৪টি টেবিল তৈরি করবে এবং RLS সিকিউরিটি পলিসি ডিজেবল করবে যেন সরাসরি ডাটা রিড-রাইট হতে পারে)।</span>
+                  </li>
+                  <li>
+                    কোড রান হওয়া সফল হলে এই পেজে ফিরে এসে নিচে থাকা <strong class="text-indigo-400">"Test Connection"</strong> বাটনে ক্লিক করুন। ব্যাস, আপনার লাইভ ক্লাউড ডাটাবেজ প্রস্তুত!
+                  </li>
+                </ol>
+              </div>
+            </div>
+          ` : ''}
+
           <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
             <!-- Left Column: Settings -->
             <div class="lg:col-span-7 bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-5">
@@ -2109,6 +861,12 @@ ALTER PUBLICATION supabase_realtime ADD TABLE members;
 ALTER PUBLICATION supabase_realtime ADD TABLE activity_logs;
 ALTER PUBLICATION supabase_realtime ADD TABLE badges;
 ALTER PUBLICATION supabase_realtime ADD TABLE audit_trails;
+
+-- Disable Row Level Security (RLS) on all tables to allow direct reads/writes
+ALTER TABLE members DISABLE ROW LEVEL SECURITY;
+ALTER TABLE activity_logs DISABLE ROW LEVEL SECURITY;
+ALTER TABLE badges DISABLE ROW LEVEL SECURITY;
+ALTER TABLE audit_trails DISABLE ROW LEVEL SECURITY;
               </pre>
             </div>
           </div>
@@ -3201,58 +1959,25 @@ function bindEvents() {
     }
   };
 
-  // Admin selector changes
-  const selector = document.getElementById('admin-selector');
-  if (selector) {
-    selector.onchange = (e) => {
-      const email = e.target.value;
-      if (email === 'custom') {
-        const customEmail = prompt('এডমিনের ইমেইল প্রবেশ করান:');
-        if (customEmail && customEmail.includes('@')) {
-          const customName = prompt('এডমিনের পুরো নাম লিখুন:');
-          if (customName) {
-            ADMIN_NAMES[customEmail] = customName;
-          } else {
-            ADMIN_NAMES[customEmail] = customEmail.split('@')[0];
-          }
-          setCurrentAdmin(customEmail);
-          
-          // Add Audit log
-          const auditTrails = getAuditTrails();
-          auditTrails.unshift({
-            id: `audit-${Date.now()}`,
-            admin_email: customEmail,
-            admin_name: ADMIN_NAMES[customEmail],
-            action: 'ADD_ADMIN',
-            entity_type: 'SESSION',
-            description: `Registered and swapped active admin session to ${customEmail}`,
-            timestamp: new Date().toISOString()
+  // Logout handler
+  const logoutBtn = document.getElementById('logout-btn');
+  if (logoutBtn) {
+    logoutBtn.onclick = () => {
+      showConfirm(
+        'আপনি কি সত্যিই এডমিন প্যানেল থেকে লগআউট করতে চান?',
+        () => {
+          localStorage.removeItem('support_linkbox_logged_in');
+          updateState({ 
+            isLoggedIn: false,
+            loginEmailInput: '',
+            loginPasswordInput: '',
+            loginError: null
           });
-          saveAuditTrails(auditTrails);
-          loadStateFromStorage();
-          updateState({});
-        } else {
-          showToast('সতর্কতা: অনুগ্রহ করে সঠিক ইমেইল এড্রেস প্রদান করুন!', 'error');
-          updateState({});
-        }
-      } else {
-        setCurrentAdmin(email);
-        
-        // Add swap audit log
-        const auditTrails = getAuditTrails();
-        auditTrails.unshift({
-          id: `audit-${Date.now()}`,
-          admin_email: email,
-          admin_name: ADMIN_NAMES[email] || email.split('@')[0],
-          action: 'SWITCH_ADMIN',
-          entity_type: 'SESSION',
-          description: `Admin swapped active session to ${email}`,
-          timestamp: new Date().toISOString()
-        });
-        saveAuditTrails(auditTrails);
-        loadStateFromStorage();
-        updateState({});
-      }
+          showToast('সফলভাবে লগআউট করা হয়েছে!', 'success');
+        },
+        null,
+        'লগআউট করুন'
+      );
     };
   }
 
@@ -4127,6 +2852,212 @@ window.addEventListener('appinstalled', () => {
   deferredPrompt = null;
   updateState({ showPwaInstallBanner: false });
 });
+
+function renderLoginPage() {
+  const errorHtml = state.loginError 
+    ? `<div class="bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs px-4 py-3 rounded-xl flex items-center gap-2 animate-pulse">
+         <i data-lucide="alert-circle" class="w-4 h-4 text-rose-400 shrink-0"></i>
+         <p class="font-bold">${state.loginError}</p>
+       </div>`
+    : '';
+
+  const showPassword = state.showPasswordState || false;
+
+  return `
+    <div class="min-h-screen bg-slate-950 flex flex-col justify-center items-center p-4 sm:p-6 relative overflow-hidden font-sans">
+      <!-- Glow background bubbles -->
+      <div class="absolute -left-32 -top-32 w-96 h-96 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none"></div>
+      <div class="absolute -right-32 -bottom-32 w-96 h-96 bg-rose-500/5 rounded-full blur-3xl pointer-events-none"></div>
+
+      <div class="w-full max-w-md bg-slate-900 border border-slate-800 p-6 sm:p-8 rounded-3xl shadow-[0_24px_50px_rgba(0,0,0,0.8)] space-y-6 relative overflow-hidden">
+        <!-- Brand identity -->
+        <div class="flex flex-col items-center text-center space-y-2">
+          <div class="w-14 h-14 bg-gradient-to-tr from-indigo-500 to-indigo-600 rounded-2xl flex items-center justify-center text-white shadow-[0_0_25px_rgba(99,102,241,0.4)] transform hover:scale-105 transition-transform duration-300">
+            <i data-lucide="shield-check" class="w-8 h-8"></i>
+          </div>
+          <h2 class="text-xl sm:text-2xl font-black text-white tracking-tight mt-3">এডমিন লগইন (Admin Login)</h2>
+          <p class="text-xs text-slate-400 max-w-xs leading-relaxed font-medium">Support Link Box ও মেম্বার অ্যাক্টিভিটি ডেটা পরিচালনা করার জন্য আপনার অ্যাকাউন্ট লগইন করুন</p>
+        </div>
+
+        <!-- Notification/Alert Box -->
+        ${errorHtml}
+
+        <!-- Login Form -->
+        <form id="login-form" class="space-y-4" onsubmit="return false;">
+          <div class="space-y-1.5">
+            <label class="block text-xs font-bold text-slate-400 uppercase tracking-wide">এডমিন ইমেইল (Email)</label>
+            <div class="relative">
+              <i data-lucide="mail" class="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2"></i>
+              <input id="login-email-input" type="email" required placeholder="example@linkbox.com" value="${state.loginEmailInput || ''}" class="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 font-medium" />
+            </div>
+          </div>
+
+          <div class="space-y-1.5">
+            <div class="flex items-center justify-between">
+              <label class="block text-xs font-bold text-slate-400 uppercase tracking-wide">পাসওয়ার্ড (Password)</label>
+            </div>
+            <div class="relative">
+              <i data-lucide="lock" class="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2"></i>
+              <input id="login-password-input" type="${showPassword ? 'text' : 'password'}" required placeholder="••••••••" value="${state.loginPasswordInput || ''}" class="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-10 py-2.5 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 font-medium" />
+              <button type="button" id="toggle-login-password" class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 p-1 cursor-pointer transition">
+                <i data-lucide="${showPassword ? 'eye-off' : 'eye'}" class="w-4 h-4"></i>
+              </button>
+            </div>
+          </div>
+
+          <button type="submit" id="login-submit-btn" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xs py-3.5 rounded-xl shadow-[0_4px_12px_rgba(79,70,229,0.3)] hover:shadow-[0_4px_20px_rgba(79,70,229,0.4)] transition-all flex items-center justify-center gap-2 cursor-pointer">
+            ${state.loginSubmitting 
+              ? `<div class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> ভেরিফাই করা হচ্ছে...`
+              : `<i data-lucide="log-in" class="w-4 h-4"></i> প্রবেশ করুন (Login)`
+            }
+          </button>
+        </form>
+
+        <!-- Quick Admin Fill Box -->
+        <div class="space-y-2 border-t border-slate-850 pt-4">
+          <div class="flex items-center justify-between">
+            <span class="text-[10px] text-slate-500 uppercase font-black tracking-wider flex items-center gap-1.5">
+              <i data-lucide="users" class="w-3.5 h-3.5"></i> কুইক সিলেক্ট (Registered Admins)
+            </span>
+            <span class="text-[9px] text-indigo-400 font-bold">অটো-ফিল করতে ক্লিক করুন</span>
+          </div>
+          <div class="grid grid-cols-2 gap-1.5 max-h-32 overflow-y-auto pr-1">
+            ${Object.entries(ADMIN_NAMES).map(([email, name]) => `
+              <button type="button" data-quick-admin="${email}" class="text-left bg-slate-950 hover:bg-indigo-950/20 border border-slate-850 hover:border-indigo-500/20 rounded-xl p-2 transition group cursor-pointer shrink-0">
+                <p class="text-[10px] font-bold text-slate-300 group-hover:text-white transition truncate">${name}</p>
+                <p class="text-[8px] text-slate-600 group-hover:text-indigo-400 transition truncate">${email}</p>
+              </button>
+            `).join('')}
+          </div>
+        </div>
+
+        <!-- Help Info Box -->
+        <div class="bg-indigo-950/20 border border-indigo-900/40 rounded-2xl p-3.5 flex gap-2.5 items-start">
+          <i data-lucide="help-circle" class="w-4.5 h-4.5 text-indigo-400 shrink-0 mt-0.5"></i>
+          <p class="text-[10px] text-slate-400 leading-relaxed font-medium">
+            <strong class="text-indigo-300">정보 / তথ্য নির্দেশিকা:</strong> <br/>
+            ১. Supabase-এ <code class="bg-slate-950 px-1 py-0.5 rounded text-indigo-400 border border-indigo-900/50 font-mono">admins</code> টেবিল থাকলে সেখান থেকে ক্লাউড ইমেইল ও পাসওয়ার্ড যাচাই করা হবে। <br/>
+            ২. ডাটাবেজ কানেক্ট না থাকলে, উপরের যেকোনো এডমিনের সাথে ডিফল্ট পাসওয়ার্ড (যেমন: <code class="bg-slate-950 px-1 py-0.5 rounded text-indigo-400 border border-indigo-900/50 font-mono">linkbox123</code> বা <code class="bg-slate-950 px-1 py-0.5 rounded text-indigo-400 border border-indigo-900/50 font-mono">123456</code>) ব্যবহার করে সাথে সাথে লগইন করা যাবে।
+          </p>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function bindLoginEvents() {
+  const emailInp = document.getElementById('login-email-input');
+  if (emailInp) {
+    emailInp.oninput = (e) => {
+      state.loginEmailInput = e.target.value;
+    };
+  }
+
+  const passInp = document.getElementById('login-password-input');
+  if (passInp) {
+    passInp.oninput = (e) => {
+      state.loginPasswordInput = e.target.value;
+    };
+  }
+
+  const togglePassBtn = document.getElementById('toggle-login-password');
+  if (togglePassBtn) {
+    togglePassBtn.onclick = () => {
+      const current = state.showPasswordState || false;
+      updateState({ showPasswordState: !current });
+    };
+  }
+
+  document.querySelectorAll('[data-quick-admin]').forEach(btn => {
+    btn.onclick = (e) => {
+      const email = e.currentTarget.getAttribute('data-quick-admin');
+      updateState({ loginEmailInput: email, loginError: null });
+    };
+  });
+
+  const form = document.getElementById('login-form');
+  if (form) {
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      
+      const email = (state.loginEmailInput || '').trim();
+      const password = (state.loginPasswordInput || '').trim();
+
+      if (!email || !password) {
+        updateState({ loginError: 'অনুগ্রহ করে ইমেইল এবং পাসওয়ার্ড উভয়ই প্রদান করুন!' });
+        return;
+      }
+
+      updateState({ loginSubmitting: true, loginError: null });
+
+      try {
+        const client = getSupabase();
+        let success = false;
+        
+        if (client) {
+          try {
+            const { data, error } = await client.from('admins').select('*').eq('email', email);
+            if (!error && data && data.length > 0) {
+              const matchedAdmin = data[0];
+              const dbPass = matchedAdmin.password || matchedAdmin.pass;
+              if (dbPass && String(dbPass).trim() === String(password).trim()) {
+                success = true;
+              }
+            }
+          } catch (err) {
+            console.warn('Supabase admins table check failed, using fallback list:', err);
+          }
+        }
+
+        const isPredefinedAdmin = Object.keys(ADMIN_NAMES).includes(email);
+        const isDefaultPassword = ['linkbox123', '123456', 'admin123'].includes(password);
+        
+        if (!success && isPredefinedAdmin && isDefaultPassword) {
+          success = true;
+        }
+
+        if (success) {
+          localStorage.setItem('support_linkbox_logged_in', 'true');
+          setCurrentAdmin(email);
+          
+          const trails = getAuditTrails();
+          trails.unshift({
+            id: `audit-${Date.now()}`,
+            admin_email: email,
+            admin_name: ADMIN_NAMES[email] || email,
+            action: 'LOGIN',
+            entity_type: 'SYSTEM',
+            description: `Admin logged in successfully from browser`,
+            timestamp: new Date().toISOString()
+          });
+          saveAuditTrails(trails);
+
+          updateState({ 
+            isLoggedIn: true, 
+            currentAdminEmail: email,
+            loginSubmitting: false,
+            loginError: null,
+            loginEmailInput: '',
+            loginPasswordInput: ''
+          });
+          
+          showToast('সফলভাবে এডমিন প্যানেলে লগইন করা হয়েছে!', 'success');
+        } else {
+          updateState({ 
+            loginSubmitting: false, 
+            loginError: 'ভুল ইমেইল অথবা পাসওয়ার্ড! পুনরায় সঠিক তথ্য দিয়ে চেষ্টা করুন।' 
+          });
+        }
+      } catch (err) {
+        console.error('Error during login authentication:', err);
+        updateState({ 
+          loginSubmitting: false, 
+          loginError: 'লগইন ভেরিফিকেশন করার সময় ত্রুটি ঘটেছে। অনুগ্রহ করে পুনরায় চেষ্টা করুন।' 
+        });
+      }
+    };
+  }
+}
 
 // Kickstart Application
 window.addEventListener('DOMContentLoaded', () => {
