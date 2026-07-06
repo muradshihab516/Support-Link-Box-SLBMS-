@@ -39,7 +39,37 @@ export function getSupabase() {
 }
 
 // Ensure configuration is up to date
+export function healSyncQueue() {
+  try {
+    let queue = JSON.parse(localStorage.getItem(STORAGE_KEYS.SYNC_QUEUE) || '[]');
+    if (Array.isArray(queue) && queue.length > 0) {
+      let changed = false;
+      queue = queue.map(job => {
+        if (job && job.table === 'members' && Array.isArray(job.data)) {
+          let maxMemberNum = job.data.reduce((max, m) => (m && m.member_number && typeof m.member_number === 'number' && m.member_number > max) ? m.member_number : max, 0);
+          job.data = job.data.map(m => {
+            if (m && (m.member_number === undefined || m.member_number === null || typeof m.member_number !== 'number')) {
+              maxMemberNum++;
+              m.member_number = maxMemberNum;
+              changed = true;
+            }
+            return m;
+          });
+        }
+        return job;
+      });
+      if (changed) {
+        localStorage.setItem(STORAGE_KEYS.SYNC_QUEUE, JSON.stringify(queue));
+        console.log('Sync Queue healed of missing member numbers.');
+      }
+    }
+  } catch (e) {
+    console.error('Failed to heal sync queue:', e);
+  }
+}
+
 export function initSupabaseConfig() {
+  healSyncQueue();
   const url = localStorage.getItem(STORAGE_KEYS.SUPABASE_URL) || DEFAULT_SUPABASE_URL;
   const key = localStorage.getItem(STORAGE_KEYS.SUPABASE_KEY) || DEFAULT_SUPABASE_KEY;
 

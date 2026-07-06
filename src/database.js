@@ -69,7 +69,39 @@ export function getMembers() {
   }
   initializeDatabase();
   try {
-    dbCache.members = JSON.parse(localStorage.getItem(STORAGE_KEYS.MEMBERS) || '[]');
+    let rawMembers = JSON.parse(localStorage.getItem(STORAGE_KEYS.MEMBERS) || '[]');
+    if (Array.isArray(rawMembers)) {
+      let maxMemberNum = rawMembers.reduce((max, m) => (m && m.member_number && typeof m.member_number === 'number' && m.member_number > max) ? m.member_number : max, 0);
+      let healed = false;
+      rawMembers = rawMembers.map(m => {
+        if (!m) return m;
+        let changed = false;
+        if (!m.id) {
+          m.id = generateUUID();
+          changed = true;
+        }
+        if (!m.name) {
+          m.name = 'Unknown Member';
+          changed = true;
+        }
+        if (m.member_number === undefined || m.member_number === null || typeof m.member_number !== 'number') {
+          maxMemberNum++;
+          m.member_number = maxMemberNum;
+          changed = true;
+        }
+        if (changed) {
+          healed = true;
+        }
+        return m;
+      }).filter(Boolean);
+
+      if (healed) {
+        localStorage.setItem(STORAGE_KEYS.MEMBERS, JSON.stringify(rawMembers));
+      }
+      dbCache.members = rawMembers;
+    } else {
+      dbCache.members = [];
+    }
   } catch (err) {
     console.error('Failed to parse members from storage, resetting:', err);
     dbCache.members = [];
