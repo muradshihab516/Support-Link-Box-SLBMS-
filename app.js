@@ -30,8 +30,8 @@ const STORAGE_KEYS = {
 };
 
 // Supabase client and sync helpers
-const _scU = ['h', 't', 't', 'p', 's', ':', '/', '/', 'n', 'g', 'a', 'k', 'e', 'a', 'p', 'u', 'v', 'n', 'w', 'f', 'v', 'f', 'o', 'q', 'v', 'i', 'd', 'c', '.', 's', 'u', 'p', 'a', 'b', 'a', 's', 'e', '.', 'c', 'o'].join('');
-const _scK = ['s', 'b', '_', 'p', 'u', 'b', 'l', 'i', 's', 'h', 'a', 'b', 'l', 'e', '_', 'U', 'K', 's', '0', 'B', 'a', 'Y', 'R', 'c', 'X', 'v', 'H', 'C', 'V', 'w', 's', 'i', '1', 'Z', 'e', 'N', 'A', '_', 'U', 'y', 'N', 'b', 'W', 'L', 'W', 'C'].join('');
+const _scU = 'https://qjqjyvxqeleasnodyexq.supabase.co';
+const _scK = 'sb_publishable_UpxW8v9KvV6AAeLlTNNTvA_basZF9bF';
 
 export function getHardcodedUrl() {
   return _scU;
@@ -937,8 +937,39 @@ let state = {
   confirmModal: null
 };
 
+// Helper to wait for Supabase CDN script to load
+export async function ensureSupabaseLoaded(maxRetries = 20) {
+  for (let i = 0; i < maxRetries; i++) {
+    if (window.supabase) {
+      return true;
+    }
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  return false;
+}
+
 // Auto-extract URL query params and secrets
 export function initSupabaseConfig() {
+  const hcUrl = getHardcodedUrl();
+  const hcKey = getHardcodedKey();
+
+  // If there are valid, non-empty hardcoded credentials, ensure they take absolute priority 
+  // and overwrite any old, stale, or empty values currently residing in the browser's local storage.
+  if (hcUrl && hcUrl.trim() !== '' && hcKey && hcKey.trim() !== '') {
+    const currentStoredUrl = localStorage.getItem(STORAGE_KEYS.SUPABASE_URL);
+    const currentStoredKey = localStorage.getItem(STORAGE_KEYS.SUPABASE_KEY);
+    
+    if (currentStoredUrl !== hcUrl || currentStoredKey !== hcKey) {
+      console.log('Synchronizing new hardcoded credentials to local storage:', hcUrl);
+      localStorage.setItem(STORAGE_KEYS.SUPABASE_URL, hcUrl);
+      localStorage.setItem(STORAGE_KEYS.SUPABASE_KEY, hcKey);
+      cachedSupabaseClient = null; // Invalidate cached client
+    }
+    if (localStorage.getItem(STORAGE_KEYS.SUPABASE_SYNC_ENABLED) === 'false') {
+      localStorage.setItem(STORAGE_KEYS.SUPABASE_SYNC_ENABLED, 'true');
+    }
+  }
+
   try {
     const urlObj = new URL(window.location.href);
     const urlParam = urlObj.searchParams.get('supabase_url') || urlObj.searchParams.get('url');
@@ -961,20 +992,14 @@ export function initSupabaseConfig() {
       urlObj.searchParams.delete('url');
       urlObj.searchParams.delete('key');
       window.history.replaceState({}, document.title, urlObj.pathname + urlObj.search);
-      
-      state.supabaseUrl = localStorage.getItem(STORAGE_KEYS.SUPABASE_URL) || getHardcodedUrl();
-      state.supabaseKey = localStorage.getItem(STORAGE_KEYS.SUPABASE_KEY) || getHardcodedKey();
+      cachedSupabaseClient = null;
     }
   } catch (e) {
     console.error('Error parsing URL query parameters for Supabase configuration:', e);
   }
 
-  if (!state.supabaseUrl) {
-    state.supabaseUrl = localStorage.getItem(STORAGE_KEYS.SUPABASE_URL) || getHardcodedUrl();
-  }
-  if (!state.supabaseKey) {
-    state.supabaseKey = localStorage.getItem(STORAGE_KEYS.SUPABASE_KEY) || getHardcodedKey();
-  }
+  state.supabaseUrl = localStorage.getItem(STORAGE_KEYS.SUPABASE_URL) || getHardcodedUrl();
+  state.supabaseKey = localStorage.getItem(STORAGE_KEYS.SUPABASE_KEY) || getHardcodedKey();
   state.loadedFromEnv = !localStorage.getItem(STORAGE_KEYS.SUPABASE_URL) && !localStorage.getItem(STORAGE_KEYS.SUPABASE_KEY);
 }
 
@@ -997,7 +1022,11 @@ function loadStateFromStorage() {
   if (state.supabaseUrl && state.supabaseKey) {
     // Non-blocking background check
     setTimeout(() => {
-      testSupabaseConnection();
+      ensureSupabaseLoaded().then(loaded => {
+        if (loaded) {
+          testSupabaseConnection();
+        }
+      });
     }, 500);
   }
 }
@@ -1415,6 +1444,21 @@ function render() {
             `).join('')}
             <option value="custom">+ Add New Admin</option>
           </select>
+          <button data-tab="supabase" class="tab-btn p-2 rounded-xl border border-slate-800 bg-slate-950/95 hover:border-indigo-500 hover:bg-slate-900 transition flex items-center justify-center relative cursor-pointer group ${
+            state.currentTab === 'supabase' ? 'border-indigo-500 bg-indigo-950/20 text-indigo-400' : 'text-slate-400'
+          }" title="Supabase Database Settings">
+            <i data-lucide="database" class="w-4 h-4"></i>
+            <span class="absolute -top-1 -right-1 flex h-2 w-2">
+              <span class="animate-ping absolute inline-flex h-full w-full rounded-full ${
+                state.supabaseConnectionStatus === 'connected' ? 'bg-emerald-400' :
+                state.supabaseConnectionStatus === 'connecting' ? 'bg-amber-400' : 'bg-rose-400'
+              } opacity-75"></span>
+              <span class="relative inline-flex rounded-full h-2 w-2 ${
+                state.supabaseConnectionStatus === 'connected' ? 'bg-emerald-500' :
+                state.supabaseConnectionStatus === 'connecting' ? 'bg-amber-500' : 'bg-rose-500'
+              }"></span>
+            </span>
+          </button>
         </div>
       </div>
     </header>
@@ -1795,6 +1839,310 @@ function render() {
 function renderTabContent(totalCount, activeCount, inactiveCount, diamondCount) {
   switch (state.currentTab) {
     
+    // TAB: SUPABASE SETTINGS
+    case 'supabase': {
+      if (!state.developerUnlocked) {
+        return `
+          <div class="max-w-md mx-auto my-12 bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl relative overflow-hidden text-center space-y-6">
+            <div class="absolute -right-16 -top-16 w-32 h-32 bg-indigo-500/10 rounded-full blur-2xl pointer-events-none"></div>
+            <div class="w-16 h-16 bg-indigo-600/10 border border-indigo-500/30 rounded-full flex items-center justify-center text-indigo-400 mx-auto">
+              <i data-lucide="lock" class="w-8 h-8"></i>
+            </div>
+            <div class="space-y-2">
+              <h3 class="text-xl font-bold text-white">Developer Settings Gate</h3>
+              <p class="text-xs text-slate-400 leading-relaxed">
+                This area is restricted to developers and authorized administrators. Please enter the developer access password to continue.
+              </p>
+            </div>
+            <div class="space-y-4">
+              <input type="password" id="dev-password-gate-input" placeholder="পাসওয়ার্ড লিখুন" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-slate-200 placeholder-slate-700 focus:outline-none focus:border-indigo-500 transition-all font-mono text-center" />
+              <p id="dev-password-error" class="hidden text-rose-500 text-xs font-semibold"></p>
+              <button id="dev-password-submit-btn" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm py-3 rounded-xl shadow-[0_4px_12px_rgba(79,70,229,0.3)] transition-all cursor-pointer">
+                প্রবেশ করুন (Unlock Panel)
+              </button>
+            </div>
+          </div>
+        `;
+      }
+
+      // Compute status styles and texts clearly to avoid nested template strings
+      const isConnected = state.supabaseConnectionStatus === 'connected';
+      const isConnecting = state.supabaseConnectionStatus === 'connecting';
+      const isError = state.supabaseConnectionStatus === 'error';
+      
+      const pingBgClass = isConnected ? 'bg-emerald-400' : 'bg-rose-400';
+      const pingDotClass = isConnected ? 'bg-emerald-500' : 'bg-rose-500';
+      
+      let statusBadgeClass = 'bg-slate-800 text-slate-400 border border-slate-700';
+      let statusTextHtml = 'কনফিগার করা হয়নি';
+      if (isConnected) {
+        statusBadgeClass = 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25';
+        statusTextHtml = 'কানেক্টেড (Connected)';
+      } else if (isConnecting) {
+        statusBadgeClass = 'bg-amber-500/15 text-amber-400 border border-amber-500/25';
+        statusTextHtml = 'সংযোগ হচ্ছে...';
+      } else if (isError) {
+        statusBadgeClass = 'bg-rose-500/15 text-rose-400 border border-rose-500/25';
+        statusTextHtml = 'ব্যর্থ (Connection Error)';
+      }
+
+      const connectionErrorHtml = (state.supabaseConnectionError && isError)
+        ? `<p class="text-[9px] text-rose-400 leading-normal line-clamp-2">${state.supabaseConnectionError}</p>`
+        : '';
+
+      const urlToggleText = state.showUrlInput ? 'লুকান' : 'দেখুন';
+      const urlInputType = state.showUrlInput ? 'text' : 'password';
+      const keyToggleText = state.showKeyInput ? 'লুকান' : 'দেখুন';
+      const keyInputType = state.showKeyInput ? 'text' : 'password';
+
+      const autoSyncChecked = state.supabaseSyncEnabled ? 'checked' : '';
+      const copiedSqlText = state.copiedSQL ? 'Copied!' : 'Copy SQL Script';
+      const copiedJsText = state.copiedJS ? 'Copied!' : 'Copy Code Snippet';
+
+      const totalMembersCount = state.members.length;
+      const totalLogsCount = state.logs.length;
+      const totalBadgesCount = state.badges ? state.badges.length : 0;
+      const totalAuditsCount = state.auditTrails.length;
+
+      return `
+        <div class="space-y-6">
+          <!-- Header Overview -->
+          <div class="bg-gradient-to-br from-slate-900 via-slate-900 to-indigo-950/20 border border-slate-800 p-6 sm:p-8 rounded-2xl shadow-xl relative overflow-hidden flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+            <div class="absolute right-0 top-0 w-80 h-80 bg-indigo-500/5 rounded-full blur-3xl pointer-events-none"></div>
+            <div class="space-y-2 z-10">
+              <div class="flex items-center gap-2">
+                <span class="flex h-2 w-2 relative">
+                  <span class="animate-ping absolute inline-flex h-full w-full rounded-full ${pingBgClass} opacity-75"></span>
+                  <span class="relative inline-flex rounded-full h-2 w-2 ${pingDotClass}"></span>
+                </span>
+                <span class="text-[9px] bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 font-black px-2 py-0.5 rounded-full uppercase tracking-widest">
+                  Cloud Configuration Console
+                </span>
+              </div>
+              <h2 class="text-xl sm:text-2xl font-black tracking-tight text-white flex items-center gap-2">
+                <i data-lucide="database" class="w-6 h-6 text-indigo-400"></i>
+                Supabase Cloud Synchronization Panel
+              </h2>
+              <p class="text-xs text-slate-400 max-w-2xl leading-relaxed">
+                এখানে আপনার Supabase ক্লাউড ডাটাবেজ ক্রেডেনশিয়ালস সেট আপ করুন এবং লোকাল ডাটাবেজের সাথে লাইভ সিংক্রোনাইজ করুন।
+              </p>
+            </div>
+            
+            <div class="bg-slate-950/85 border border-slate-800 rounded-2xl p-4 w-full md:w-64 space-y-2 shrink-0 z-10">
+              <p class="text-[10px] text-slate-500 uppercase font-bold tracking-wider">সংযুক্তি স্ট্যাটাস</p>
+              <div class="flex items-center gap-2">
+                <div class="px-2.5 py-1 rounded-full text-[10px] font-bold ${statusBadgeClass}">
+                  ${statusTextHtml}
+                </div>
+              </div>
+              ${connectionErrorHtml}
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            <!-- Left Column: Settings -->
+            <div class="lg:col-span-7 bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-5">
+              <div class="flex items-center gap-2 border-b border-slate-800 pb-3">
+                <i data-lucide="settings" class="w-5 h-5 text-indigo-400"></i>
+                <h3 class="font-bold text-slate-100 text-sm">ক্রেডেনশিয়ালস কনফিগারেশন (API Settings)</h3>
+              </div>
+              
+              <div class="space-y-4">
+                <!-- URL Input -->
+                <div class="space-y-1.5">
+                  <label class="block text-xs font-semibold text-slate-400 flex justify-between">
+                    <span>Supabase URL</span>
+                    <button id="toggle-url-visibility-btn" class="text-[10px] text-indigo-400 hover:text-indigo-300 font-bold cursor-pointer font-sans">
+                      ${urlToggleText}
+                    </button>
+                  </label>
+                  <input type="${urlInputType}" id="supabase-url-input" value="${state.supabaseUrl || ''}" placeholder="https://xxxxxx.supabase.co" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-200 placeholder-slate-700 focus:outline-none focus:border-indigo-500 font-mono" />
+                </div>
+
+                <!-- Key Input -->
+                <div class="space-y-1.5">
+                  <label class="block text-xs font-semibold text-slate-400 flex justify-between">
+                    <span>Supabase Anon Public Key</span>
+                    <button id="toggle-key-visibility-btn" class="text-[10px] text-indigo-400 hover:text-indigo-300 font-bold cursor-pointer font-sans">
+                      ${keyToggleText}
+                    </button>
+                  </label>
+                  <input type="${keyInputType}" id="supabase-key-input" value="${state.supabaseKey || ''}" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-200 placeholder-slate-700 focus:outline-none focus:border-indigo-500 font-mono" />
+                </div>
+
+                <!-- Sync Toggle -->
+                <div class="bg-slate-950 border border-slate-850 p-4 rounded-xl flex items-center justify-between">
+                  <div class="space-y-0.5">
+                    <h4 class="text-xs font-bold text-slate-200">ব্যাকগ্রাউন্ড অটো-সিংক্রোনাইজেশন</h4>
+                    <p class="text-[10px] text-slate-500 leading-normal">ডাটা পরিবর্তন হওয়ার সাথে সাথে স্বয়ংক্রিয়ভাবে ক্লাউডে সেভ হবে।</p>
+                  </div>
+                  <label class="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" id="supabase-autosync-toggle" class="sr-only peer" ${autoSyncChecked} />
+                    <div class="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-slate-300 after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
+                  </label>
+                </div>
+
+                <!-- Action buttons -->
+                <div class="flex flex-wrap gap-2.5 pt-2">
+                  <button id="save-supabase-config-btn" class="bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs px-5 py-2.5 rounded-xl transition cursor-pointer flex items-center gap-1.5 shadow-[0_4px_12px_rgba(79,70,229,0.3)]">
+                    <i data-lucide="save" class="w-3.5 h-3.5"></i> সেভ করুন
+                  </button>
+                  <button id="test-connection-btn" class="bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 font-bold text-xs px-5 py-2.5 rounded-xl transition cursor-pointer flex items-center gap-1.5">
+                    <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> কানেকশন টেস্ট
+                  </button>
+                  <button id="clear-supabase-config-btn" class="bg-rose-950/30 hover:bg-rose-900/40 text-rose-400 border border-rose-900/30 font-bold text-xs px-4 py-2.5 rounded-xl transition cursor-pointer ml-auto flex items-center gap-1.5">
+                    <i data-lucide="trash-2" class="w-3.5 h-3.5"></i> ক্রেডেনশিয়ালস মুছুন
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Right Column: Sync Control -->
+            <div class="lg:col-span-5 bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-5">
+              <div class="flex items-center gap-2 border-b border-slate-800 pb-3">
+                <i data-lucide="refresh-cw" class="w-5 h-5 text-indigo-400"></i>
+                <h3 class="font-bold text-slate-100 text-sm">ডাটাবেজ সিংক্রোনাইজেশন (Manual Sync)</h3>
+              </div>
+              
+              <p class="text-xs text-slate-400 leading-relaxed">
+                নিচের বাটনগুলোর মাধ্যমে আপনি ম্যানুয়ালি ক্লাউড ডাটাবেজে ডাটা আপলোড বা ক্লাউড থেকে ডাটা ব্রাউজারে নামিয়ে নিতে পারেন।
+              </p>
+
+              <div class="grid grid-cols-2 gap-3 pt-1">
+                <!-- Push Button -->
+                <button id="push-supabase-btn" class="bg-gradient-to-br from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white font-bold text-xs p-4 rounded-xl shadow-lg transition flex flex-col items-center justify-center gap-2 border border-indigo-500/30 cursor-pointer">
+                  <i data-lucide="upload-cloud" class="w-6 h-6"></i>
+                  <span class="font-bold">Push to Cloud</span>
+                  <span class="text-[9px] text-indigo-200 font-medium font-mono">লোকাল ডাটা ক্লাউডে পাঠান</span>
+                </button>
+
+                <!-- Pull Button -->
+                <button id="pull-supabase-btn" class="bg-slate-950 hover:bg-slate-900 border border-slate-800 hover:border-slate-750 text-slate-200 font-bold text-xs p-4 rounded-xl shadow-md transition flex flex-col items-center justify-center gap-2 cursor-pointer">
+                  <i data-lucide="download-cloud" class="w-6 h-6 text-emerald-400"></i>
+                  <span class="font-bold">Pull from Cloud</span>
+                  <span class="text-[9px] text-slate-500 font-medium font-mono">ক্লাউড ডাটা নামিয়ে আনুন</span>
+                </button>
+              </div>
+
+              <div class="bg-slate-950/70 border border-slate-850 p-4 rounded-xl space-y-2 text-xs">
+                <h4 class="font-bold text-slate-300">লোকাল ডাটাবেজ পরিসংখ্যান:</h4>
+                <div class="grid grid-cols-2 gap-y-2 font-mono text-[10px] text-slate-400">
+                  <div>👥 Members: <span class="text-white font-bold">${totalMembersCount}</span></div>
+                  <div>📝 Activity Logs: <span class="text-white font-bold">${totalLogsCount}</span></div>
+                  <div>🏅 Badges: <span class="text-white font-bold">${totalBadgesCount}</span></div>
+                  <div>🛡️ Audit Trails: <span class="text-white font-bold">${totalAuditsCount}</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Schema Setup Instructions -->
+          <div class="bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-4">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div class="flex items-center gap-2">
+                <i data-lucide="terminal" class="w-5 h-5 text-indigo-400"></i>
+                <h3 class="font-bold text-slate-100 text-sm">Supabase Table Schema Setup Script</h3>
+              </div>
+              <button id="copy-sql-btn" class="text-xs bg-slate-850 hover:bg-slate-800 border border-slate-800 text-indigo-400 hover:text-indigo-300 px-3 py-1.5 rounded-lg font-bold flex items-center gap-1 cursor-pointer transition">
+                <i data-lucide="copy" class="w-3.5 h-3.5"></i>
+                ${copiedSqlText}
+              </button>
+            </div>
+            
+            <p class="text-xs text-slate-400 leading-relaxed">
+              আপনার Supabase প্রোজেক্টের <strong class="text-slate-200">SQL Editor</strong>-এ গিয়ে নিচের স্ক্রিপ্টটি রান করান। এটি প্রয়োজনীয় ৪টি টেবিল এবং লাইভ সিংক্রোনাইজেশন এনাবেল করার কনফিগারেশন সেট আপ করে দেবে।
+            </p>
+
+            <div class="bg-slate-950 rounded-xl p-4 border border-slate-850 overflow-x-auto max-h-60">
+              <pre class="text-[10px] font-mono text-emerald-400 leading-relaxed">-- Create Members Table
+CREATE TABLE members (
+  id VARCHAR(255) PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
+  display_name VARCHAR(255),
+  member_number INT NOT NULL,
+  status VARCHAR(50) DEFAULT 'active',
+  level VARCHAR(50) DEFAULT 'Bronze',
+  total_points INT DEFAULT 0,
+  current_streak INT DEFAULT 0,
+  longest_streak INT DEFAULT 0,
+  consecutive_inactive_days INT DEFAULT 0,
+  total_active_days INT DEFAULT 0,
+  last_active_date VARCHAR(50),
+  notes TEXT,
+  updated_at VARCHAR(255)
+);
+
+-- Create Activity Logs Table
+CREATE TABLE activity_logs (
+  id VARCHAR(255) PRIMARY KEY,
+  member_id VARCHAR(255) REFERENCES members(id) ON DELETE CASCADE,
+  activity_date VARCHAR(50),
+  points_added INT DEFAULT 0,
+  submitted_by VARCHAR(255),
+  link VARCHAR(1000),
+  status VARCHAR(50) DEFAULT 'pending',
+  timestamp VARCHAR(255)
+);
+
+-- Create Badges Table
+CREATE TABLE badges (
+  id VARCHAR(255) PRIMARY KEY,
+  member_id VARCHAR(255) REFERENCES members(id) ON DELETE CASCADE,
+  badge_name VARCHAR(255),
+  description TEXT,
+  earned_date VARCHAR(50)
+);
+
+-- Create Audit Trails Table
+CREATE TABLE audit_trails (
+  id VARCHAR(255) PRIMARY KEY,
+  admin_email VARCHAR(255),
+  admin_name VARCHAR(255),
+  action VARCHAR(255),
+  entity_type VARCHAR(255),
+  description TEXT,
+  timestamp VARCHAR(255)
+);
+
+-- Enable Realtime for all tables
+ALTER PUBLICATION supabase_realtime ADD TABLE members;
+ALTER PUBLICATION supabase_realtime ADD TABLE activity_logs;
+ALTER PUBLICATION supabase_realtime ADD TABLE badges;
+ALTER PUBLICATION supabase_realtime ADD TABLE audit_trails;
+              </pre>
+            </div>
+          </div>
+
+          <!-- JavaScript/React Connection Snippet -->
+          <div class="bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-4">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div class="flex items-center gap-2">
+                <i data-lucide="code" class="w-5 h-5 text-indigo-400"></i>
+                <h3 class="font-bold text-slate-100 text-sm">React/JS Connection Code Snippet</h3>
+              </div>
+              <button id="copy-js-btn" class="text-xs bg-slate-850 hover:bg-slate-800 border border-slate-800 text-indigo-400 hover:text-indigo-300 px-3 py-1.5 rounded-lg font-bold flex items-center gap-1 cursor-pointer transition">
+                <i data-lucide="copy" class="w-3.5 h-3.5"></i>
+                ${copiedJsText}
+              </button>
+            </div>
+            
+            <p class="text-xs text-slate-400 leading-relaxed">
+              আপনার কোডে Supabase ক্লায়েন্ট ইনিশিয়ালাইজ করার জন্য নিচের কোড রেফারেন্সটি ব্যবহার করতে পারেন।
+            </p>
+
+            <div class="bg-slate-950 rounded-xl p-4 border border-slate-850 overflow-x-auto max-h-40">
+              <pre class="text-[10px] font-mono text-indigo-300 leading-relaxed">import { createClient } from '@supabase/supabase-js'
+
+const supabaseUrl = '${state.supabaseUrl || 'https://your-project.supabase.co'}'
+const supabaseKey = '${state.supabaseKey || 'your-anon-public-key'}'
+export const supabase = createClient(supabaseUrl, supabaseKey)
+              </pre>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
     // TAB: MEMBERS
     case 'members': {
       // Search and Filter records
@@ -3477,7 +3825,7 @@ function bindEvents() {
           // 2. Open state modal with the image URL for mobile users or cross-origin fallbacks
           updateState({ 
             isDownloadingReport: false,
-            generatedPngUrl: blobUrl,
+            generatedPngUrl: imgData,
             generatedPngMemberName: selectedMember.name
           });
         }).catch(err => {
@@ -3792,9 +4140,14 @@ window.addEventListener('DOMContentLoaded', () => {
       .catch(err => console.warn('Service Worker registration failed:', err));
   }
 
-  // Instantly perform a silent background sync on load to ensure up-to-date data on other devices
-  silentPullFromSupabase().then(() => {
-    setupSupabaseRealtime();
+  // Wait for Supabase CDN to load, then run initial sync and setup realtime listeners
+  ensureSupabaseLoaded().then(loaded => {
+    if (loaded) {
+      initSupabaseConfig();
+      silentPullFromSupabase().then(() => {
+        setupSupabaseRealtime();
+      });
+    }
   });
 
   // Periodic automatic sync every 2 minutes (120,000 ms)
