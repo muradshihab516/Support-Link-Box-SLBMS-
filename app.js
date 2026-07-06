@@ -3042,6 +3042,11 @@ function bindLoginEvents() {
           });
           
           showToast('সফলভাবে এডমিন প্যানেলে লগইন করা হয়েছে!', 'success');
+
+          // Immediately perform bidirectional smart sync and set up realtime channels on login success
+          silentPullFromSupabase().then(() => {
+            setupSupabaseRealtime();
+          });
         } else {
           updateState({ 
             loginSubmitting: false, 

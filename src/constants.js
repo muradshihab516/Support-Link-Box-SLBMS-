@@ -23,7 +23,7 @@ export const STORAGE_KEYS = {
 
 // Default credentials
 export const DEFAULT_SUPABASE_URL = 'https://qjqjyvxqeleasnodyexq.supabase.co';
-export const DEFAULT_SUPABASE_KEY = 'sb_publishable_UpxW8v9KvV6AAeLlTNNTvA_basZF9bF';
+export const DEFAULT_SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFqcWp5dnhxZWxlYXNub2R5ZXhxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMzNDAwODEsImV4cCI6MjA5ODkxNjA4MX0.hnhNCssPzHqcZGb8f_Yl0l6LHYHX1TKGOQ_edjc2t18';
 
 // Status Calculation Thresholds & Magic Numbers
 export const CONFIG = {

@@ -82,111 +82,58 @@ export function initSupabaseConfig() {
 }
 
 // ----------------------------------------------------
-// SINGLE SYNC QUEUE MANAGER (UI -> Local DB -> Queue -> Supabase)
+// DIRECT DEBOUNCED SYNC ENGINE (Self-Healing, Multi-Browser Alignment)
 // ----------------------------------------------------
+
+const debounceTimers = {};
 
 export function enqueueSyncJob(table, data) {
   if (localStorage.getItem(STORAGE_KEYS.SUPABASE_SYNC_ENABLED) === 'false') return;
 
-  let queue = [];
-  try {
-    queue = JSON.parse(localStorage.getItem(STORAGE_KEYS.SYNC_QUEUE) || '[]');
-  } catch (e) {
-    queue = [];
-  }
-
-  // Deduplicate and fold: If there is already a pending sync for this table, 
-  // overwrite its payload with the newest state. This avoids redundant writes.
-  const existingIndex = queue.findIndex(job => job.table === table);
-  if (existingIndex !== -1) {
-    queue[existingIndex].data = data;
-    queue[existingIndex].timestamp = Date.now();
-  } else {
-    queue.push({
-      id: `sync-job-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-      table,
-      data,
-      timestamp: Date.now()
-    });
-  }
-
-  localStorage.setItem(STORAGE_KEYS.SYNC_QUEUE, JSON.stringify(queue));
-  
-  // Asynchronously trigger queue processing
-  setTimeout(processSyncQueue, 50);
-}
-
-export async function processSyncQueue() {
-  if (isProcessingQueue) return;
   const client = getSupabase();
   if (!client) return;
 
-  if (localStorage.getItem(STORAGE_KEYS.SUPABASE_SYNC_ENABLED) === 'false') return;
-
-  let queue = [];
-  try {
-    queue = JSON.parse(localStorage.getItem(STORAGE_KEYS.SYNC_QUEUE) || '[]');
-  } catch (e) {
-    return;
+  if (debounceTimers[table]) {
+    clearTimeout(debounceTimers[table]);
   }
 
-  if (queue.length === 0) {
-    updateState({ supabaseSyncing: false });
-    return;
-  }
-
-  isProcessingQueue = true;
   updateState({ supabaseSyncing: true });
 
-  const job = queue[0];
-  console.log(`Sync Queue: Processing job ${job.id} for table ${job.table}...`);
-
-  try {
-    const { error } = await client.from(job.table).upsert(job.data);
-    if (error) {
-      throw error;
-    }
-
-    // Success: reload queue, shift first, write back
+  debounceTimers[table] = setTimeout(async () => {
     try {
-      queue = JSON.parse(localStorage.getItem(STORAGE_KEYS.SYNC_QUEUE) || '[]');
-    } catch(e) {
-      queue = [];
+      console.log(`Direct Sync: Saving table "${table}" to Supabase...`);
+      const { error } = await client.from(table).upsert(data);
+      if (error) {
+        console.error(`Direct Sync error for ${table}:`, error);
+        updateState({ 
+          supabaseConnectionStatus: 'error',
+          supabaseConnectionError: `সিঙ্ক ত্রুটি (${table}): ${error.message}`,
+          supabaseSyncing: false
+        });
+      } else {
+        updateState({ 
+          supabaseConnectionStatus: 'connected',
+          supabaseConnectionError: '',
+          supabaseSyncing: false
+        });
+      }
+    } catch (err) {
+      console.error(`Direct Sync exception for ${table}:`, err);
+      updateState({ supabaseSyncing: false });
     }
-    
-    // Check if the first job is indeed the one we just processed
-    if (queue.length > 0 && queue[0].id === job.id) {
-      queue.shift();
-    } else {
-      // Otherwise just filter it out
-      queue = queue.filter(q => q.id !== job.id);
-    }
-    
-    localStorage.setItem(STORAGE_KEYS.SYNC_QUEUE, JSON.stringify(queue));
-    updateState({ 
-      supabaseConnectionStatus: 'connected',
-      supabaseConnectionError: ''
-    });
+  }, 400); // 400ms debounce to pack multiple changes (e.g., bulk log entry)
+}
 
-    isProcessingQueue = false;
-    // Process next job
-    processSyncQueue();
-  } catch (err) {
-    console.error(`Sync Queue: Job ${job.id} failed:`, err);
-    updateState({ 
-      supabaseConnectionStatus: 'error',
-      supabaseConnectionError: err.message || 'Synchronization failed'
-    });
-    isProcessingQueue = false;
-
-    // Retry after 10 seconds if still offline or error persists
-    setTimeout(processSyncQueue, 10000);
-  }
+export async function processSyncQueue() {
+  // Dummy helper for backwards compatibility
+  return;
 }
 
 // ----------------------------------------------------
-// REALTIME LIVE SYNCHRONIZATION (With Loopback Prevention)
+// REALTIME LIVE SYNCHRONIZATION (Fetch-Based Source-of-Truth Alignment)
 // ----------------------------------------------------
+
+const realtimeDebounceTimers = {};
 
 export function setupSupabaseRealtime() {
   const client = getSupabase();
@@ -200,24 +147,53 @@ export function setupSupabaseRealtime() {
   console.log('Initializing Supabase Realtime Channels for Live Sync...');
   realtimeChannel = client.channel('public-db-changes')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'members' }, (payload) => {
-      console.log('Realtime change: members', payload);
+      console.log('Realtime change detected on "members":', payload);
       handleRealtimeChange('members', payload);
     })
     .on('postgres_changes', { event: '*', schema: 'public', table: 'activity_logs' }, (payload) => {
-      console.log('Realtime change: activity_logs', payload);
+      console.log('Realtime change detected on "activity_logs":', payload);
       handleRealtimeChange('activity_logs', payload);
     })
     .on('postgres_changes', { event: '*', schema: 'public', table: 'badges' }, (payload) => {
-      console.log('Realtime change: badges', payload);
+      console.log('Realtime change detected on "badges":', payload);
       handleRealtimeChange('badges', payload);
     })
     .on('postgres_changes', { event: '*', schema: 'public', table: 'audit_trails' }, (payload) => {
-      console.log('Realtime change: audit_trails', payload);
+      console.log('Realtime change detected on "audit_trails":', payload);
       handleRealtimeChange('audit_trails', payload);
     })
     .subscribe((status) => {
       console.log('Supabase realtime connection status:', status);
     });
+}
+
+async function handleRealtimeTableSync(table) {
+  if (realtimeDebounceTimers[table]) {
+    clearTimeout(realtimeDebounceTimers[table]);
+  }
+
+  // 200ms debounce to group rapid successive broadcasts from other browser sessions
+  realtimeDebounceTimers[table] = setTimeout(async () => {
+    const client = getSupabase();
+    if (!client) return;
+
+    try {
+      console.log(`Realtime Fetch: Re-aligning local table "${table}" with Supabase...`);
+      const { data, error } = await client.from(table).select('*');
+      if (error) {
+        console.error(`Failed to fetch latest table "${table}" via realtime trigger:`, error);
+        return;
+      }
+
+      if (data) {
+        console.log(`Realtime Fetch: Successfully synchronized ${data.length} records for "${table}"`);
+        saveLocalDataWithoutSync(table, data);
+        triggerStateReload(table);
+      }
+    } catch (err) {
+      console.error(`Exception during realtime table fetch "${table}":`, err);
+    }
+  }, 200);
 }
 
 function handleRealtimeChange(table, payload) {
@@ -231,48 +207,8 @@ function handleRealtimeChange(table, payload) {
   const key = storageKeyMap[table];
   if (!key) return;
 
-  try {
-    let localData = [];
-    if (table === 'members') localData = getMembers();
-    else if (table === 'activity_logs') localData = getActivityLogs();
-    else if (table === 'badges') localData = getBadges();
-    else if (table === 'audit_trails') localData = getAuditTrails();
-
-    const { eventType, new: newRecord, old: oldRecord } = payload;
-
-    if (eventType === 'INSERT') {
-      if (!localData.some(item => item.id === newRecord.id)) {
-        localData.push(newRecord);
-        // Save skipping queue to prevent looping writes back to cloud
-        saveLocalDataWithoutSync(table, localData);
-        triggerStateReload(table);
-      }
-    } else if (eventType === 'UPDATE') {
-      let updated = false;
-      localData = localData.map(item => {
-        if (item.id === newRecord.id) {
-          if (JSON.stringify(item) !== JSON.stringify(newRecord)) {
-            updated = true;
-            return newRecord;
-          }
-        }
-        return item;
-      });
-      if (updated) {
-        saveLocalDataWithoutSync(table, localData);
-        triggerStateReload(table);
-      }
-    } else if (eventType === 'DELETE') {
-      const initialLength = localData.length;
-      localData = localData.filter(item => item.id !== oldRecord.id);
-      if (localData.length !== initialLength) {
-        saveLocalDataWithoutSync(table, localData);
-        triggerStateReload(table);
-      }
-    }
-  } catch (err) {
-    console.error('Error handling realtime update:', err);
-  }
+  // Align local cache by downloading the entire table from Supabase directly
+  handleRealtimeTableSync(table);
 }
 
 function saveLocalDataWithoutSync(table, data) {
