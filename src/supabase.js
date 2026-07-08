@@ -70,6 +70,19 @@ export function healSyncQueue() {
 
 export function initSupabaseConfig() {
   healSyncQueue();
+  
+  // Auto-migrate stored credentials if they contain old default URL/Key to avoid stale cache issues
+  const storedUrl = localStorage.getItem(STORAGE_KEYS.SUPABASE_URL);
+  const storedKey = localStorage.getItem(STORAGE_KEYS.SUPABASE_KEY);
+  
+  const isOldDefaultKey = storedKey && storedKey.startsWith('eyJhbGci');
+  
+  if (isOldDefaultKey || (storedUrl && storedUrl !== DEFAULT_SUPABASE_URL)) {
+    console.log('Migrating stored Supabase URL and Key to the new defaults...');
+    localStorage.setItem(STORAGE_KEYS.SUPABASE_URL, DEFAULT_SUPABASE_URL);
+    localStorage.setItem(STORAGE_KEYS.SUPABASE_KEY, DEFAULT_SUPABASE_KEY);
+  }
+
   const url = localStorage.getItem(STORAGE_KEYS.SUPABASE_URL) || DEFAULT_SUPABASE_URL;
   const key = localStorage.getItem(STORAGE_KEYS.SUPABASE_KEY) || DEFAULT_SUPABASE_KEY;
 
@@ -79,6 +92,123 @@ export function initSupabaseConfig() {
     supabaseKey: key,
     supabaseSyncEnabled: localStorage.getItem(STORAGE_KEYS.SUPABASE_SYNC_ENABLED) !== 'false'
   });
+}
+
+// ----------------------------------------------------
+// DATABASE MAPPER ENGINE (Ensures strict column compatibility with Supabase)
+// ----------------------------------------------------
+
+export function mapLocalToDb(table, record) {
+  if (!record) return null;
+  if (table === 'members') {
+    return {
+      id: record.id,
+      name: record.name,
+      display_name: record.display_name || '',
+      member_number: parseInt(record.member_number, 10) || 0,
+      status: record.status || 'active',
+      level: record.level || 'Bronze',
+      total_points: parseInt(record.total_points, 10) || 0,
+      current_streak: parseInt(record.current_streak, 10) || 0,
+      longest_streak: parseInt(record.longest_streak, 10) || 0,
+      consecutive_inactive_days: parseInt(record.consecutive_inactive_days, 10) || 0,
+      total_active_days: parseInt(record.total_active_days, 10) || 0,
+      last_active_date: record.last_active_date || null,
+      notes: record.notes || '',
+      updated_at: record.updated_at || new Date().toISOString()
+    };
+  }
+  if (table === 'activity_logs') {
+    return {
+      id: record.id,
+      member_id: record.member_id,
+      activity_date: record.activity_date,
+      points_added: parseInt(record.points_added !== undefined ? record.points_added : record.points_earned, 10) || 0,
+      submitted_by: record.submitted_by || '',
+      link: record.link || null,
+      status: record.status || 'approved',
+      timestamp: record.timestamp || record.created_at || new Date().toISOString()
+    };
+  }
+  if (table === 'badges') {
+    return {
+      id: record.id,
+      member_id: record.member_id,
+      badge_name: record.badge_name || '',
+      description: record.description || 'Badge earned by links or active streak achievement',
+      earned_date: record.earned_date || record.earned_at || new Date().toISOString().split('T')[0]
+    };
+  }
+  if (table === 'audit_trails') {
+    return {
+      id: record.id,
+      admin_email: record.admin_email || '',
+      admin_name: record.admin_name || '',
+      action: record.action || '',
+      entity_type: record.entity_type || '',
+      description: record.description || '',
+      timestamp: record.timestamp || new Date().toISOString()
+    };
+  }
+  return record;
+}
+
+export function mapDbToLocal(table, record) {
+  if (!record) return null;
+  if (table === 'members') {
+    return {
+      id: record.id,
+      name: record.name,
+      display_name: record.display_name || '',
+      member_number: parseInt(record.member_number, 10) || 0,
+      status: record.status || 'active',
+      level: record.level || 'Bronze',
+      total_points: parseInt(record.total_points, 10) || 0,
+      current_streak: parseInt(record.current_streak, 10) || 0,
+      longest_streak: parseInt(record.longest_streak, 10) || 0,
+      consecutive_inactive_days: parseInt(record.consecutive_inactive_days, 10) || 0,
+      total_active_days: parseInt(record.total_active_days, 10) || 0,
+      last_active_date: record.last_active_date || null,
+      notes: record.notes || '',
+      created_at: record.created_at || record.updated_at || new Date().toISOString(),
+      updated_at: record.updated_at || new Date().toISOString()
+    };
+  }
+  if (table === 'activity_logs') {
+    return {
+      id: record.id,
+      member_id: record.member_id,
+      activity_date: record.activity_date,
+      is_active: record.status === 'approved' || (parseInt(record.points_added, 10) || 0) > 0,
+      points_earned: parseInt(record.points_added, 10) || 0,
+      submitted_by: record.submitted_by || '',
+      link: record.link || '',
+      status: record.status || 'approved',
+      created_at: record.timestamp || new Date().toISOString()
+    };
+  }
+  if (table === 'badges') {
+    return {
+      id: record.id,
+      member_id: record.member_id,
+      badge_type: record.badge_type || (record.badge_name ? (record.badge_name.includes('3-Day') ? 'streak_3' : record.badge_name.includes('7-Day') ? 'streak_7' : record.badge_name.includes('15-Day') ? 'streak_15' : record.badge_name.includes('Silver') ? 'silver_points' : 'gold_points') : 'streak_3'),
+      badge_name: record.badge_name || '',
+      description: record.description || '',
+      earned_at: record.earned_date || new Date().toISOString()
+    };
+  }
+  if (table === 'audit_trails') {
+    return {
+      id: record.id,
+      admin_email: record.admin_email || '',
+      admin_name: record.admin_name || '',
+      action: record.action || '',
+      entity_type: record.entity_type || '',
+      description: record.description || '',
+      timestamp: record.timestamp || new Date().toISOString()
+    };
+  }
+  return record;
 }
 
 // ----------------------------------------------------
@@ -102,7 +232,11 @@ export function enqueueSyncJob(table, data) {
   debounceTimers[table] = setTimeout(async () => {
     try {
       console.log(`Direct Sync: Saving table "${table}" to Supabase...`);
-      const { error } = await client.from(table).upsert(data);
+      const mappedData = Array.isArray(data)
+        ? data.map(item => mapLocalToDb(table, item)).filter(Boolean)
+        : mapLocalToDb(table, data);
+
+      const { error } = await client.from(table).upsert(mappedData);
       if (error) {
         console.error(`Direct Sync error for ${table}:`, error);
         updateState({ 
@@ -121,7 +255,7 @@ export function enqueueSyncJob(table, data) {
       console.error(`Direct Sync exception for ${table}:`, err);
       updateState({ supabaseSyncing: false });
     }
-  }, 400); // 400ms debounce to pack multiple changes (e.g., bulk log entry)
+  }, 100); // 100ms debounce for rapid instant uploads
 }
 
 export async function processSyncQueue() {
@@ -187,8 +321,102 @@ async function handleRealtimeTableSync(table) {
 
       if (data) {
         console.log(`Realtime Fetch: Successfully synchronized ${data.length} records for "${table}"`);
-        saveLocalDataWithoutSync(table, data);
-        triggerStateReload(table);
+        
+        const localMappedData = data.map(item => mapDbToLocal(table, item)).filter(Boolean);
+
+        if (table === 'members') {
+          const localMembers = getMembers();
+          const mergedMembersMap = new Map();
+          
+          localMembers.forEach(m => {
+            if (m && m.id) {
+              mergedMembersMap.set(m.id, m);
+            }
+          });
+
+          localMappedData.forEach(rm => {
+            if (rm && rm.id) {
+              const em = mergedMembersMap.get(rm.id);
+              if (!em) {
+                mergedMembersMap.set(rm.id, rm);
+              } else {
+                const emTime = em.updated_at ? new Date(em.updated_at).getTime() : 0;
+                const rmTime = rm.updated_at ? new Date(rm.updated_at).getTime() : 0;
+                if (rmTime >= emTime) {
+                  mergedMembersMap.set(rm.id, {
+                    ...em,
+                    ...rm,
+                    total_points: Math.max(em.total_points || 0, rm.total_points || 0),
+                    current_streak: Math.max(em.current_streak || 0, rm.current_streak || 0),
+                    longest_streak: Math.max(em.longest_streak || 0, rm.longest_streak || 0),
+                    total_active_days: Math.max(em.total_active_days || 0, rm.total_active_days || 0)
+                  });
+                }
+              }
+            }
+          });
+
+          const mergedMembers = deduplicateMembers(Array.from(mergedMembersMap.values()), client);
+          saveLocalDataWithoutSync('members', mergedMembers);
+          triggerStateReload('members');
+        } else if (table === 'activity_logs') {
+          const localLogs = getActivityLogs();
+          const mergedLogsMap = new Map();
+          
+          localLogs.forEach(l => {
+            if (l && l.id) {
+              mergedLogsMap.set(l.id, l);
+            }
+          });
+
+          localMappedData.forEach(rl => {
+            if (rl && rl.id) {
+              mergedLogsMap.set(rl.id, rl);
+            }
+          });
+
+          const mergedLogs = Array.from(mergedLogsMap.values());
+          saveLocalDataWithoutSync('activity_logs', mergedLogs);
+          triggerStateReload('activity_logs');
+        } else if (table === 'badges') {
+          const localBadges = getBadges();
+          const mergedBadgesMap = new Map();
+
+          localBadges.forEach(b => {
+            if (b && b.id) {
+              mergedBadgesMap.set(b.id, b);
+            }
+          });
+
+          localMappedData.forEach(rb => {
+            if (rb && rb.id) {
+              mergedBadgesMap.set(rb.id, rb);
+            }
+          });
+
+          const mergedBadges = Array.from(mergedBadgesMap.values());
+          saveLocalDataWithoutSync('badges', mergedBadges);
+          triggerStateReload('badges');
+        } else if (table === 'audit_trails') {
+          const localAudits = getAuditTrails();
+          const mergedAuditsMap = new Map();
+
+          localAudits.forEach(a => {
+            if (a && a.id) {
+              mergedAuditsMap.set(a.id, a);
+            }
+          });
+
+          localMappedData.forEach(ra => {
+            if (ra && ra.id) {
+              mergedAuditsMap.set(ra.id, ra);
+            }
+          });
+
+          const mergedAudits = Array.from(mergedAuditsMap.values());
+          saveLocalDataWithoutSync('audit_trails', mergedAudits);
+          triggerStateReload('audit_trails');
+        }
       }
     } catch (err) {
       console.error(`Exception during realtime table fetch "${table}":`, err);
@@ -321,10 +549,10 @@ export async function performSmartSync(silent = true) {
     if (remoteB.error) throw new Error(`Badges: ${remoteB.error.message}`);
     if (remoteA.error) throw new Error(`Audit Trails: ${remoteA.error.message}`);
 
-    const rMembers = remoteM.data || [];
-    const rLogs = remoteL.data || [];
-    const rBadges = remoteB.data || [];
-    const rAudits = remoteA.data || [];
+    const rMembers = (remoteM.data || []).map(item => mapDbToLocal('members', item)).filter(Boolean);
+    const rLogs = (remoteL.data || []).map(item => mapDbToLocal('activity_logs', item)).filter(Boolean);
+    const rBadges = (remoteB.data || []).map(item => mapDbToLocal('badges', item)).filter(Boolean);
+    const rAudits = (remoteA.data || []).map(item => mapDbToLocal('audit_trails', item)).filter(Boolean);
 
     const localMembers = getMembers();
     const localLogs = getActivityLogs();
@@ -338,10 +566,22 @@ export async function performSmartSync(silent = true) {
       console.log('Smart Sync: Remote database is empty. Auto-pushing local data to populate Cloud...');
       
       const upsertPromises = [];
-      if (localMembers.length > 0) upsertPromises.push(client.from('members').upsert(localMembers));
-      if (localLogs.length > 0) upsertPromises.push(client.from('activity_logs').upsert(localLogs));
-      if (localBadges.length > 0) upsertPromises.push(client.from('badges').upsert(localBadges));
-      if (localAudits.length > 0) upsertPromises.push(client.from('audit_trails').upsert(localAudits));
+      if (localMembers.length > 0) {
+        const dbMembers = localMembers.map(item => mapLocalToDb('members', item)).filter(Boolean);
+        upsertPromises.push(client.from('members').upsert(dbMembers));
+      }
+      if (localLogs.length > 0) {
+        const dbLogs = localLogs.map(item => mapLocalToDb('activity_logs', item)).filter(Boolean);
+        upsertPromises.push(client.from('activity_logs').upsert(dbLogs));
+      }
+      if (localBadges.length > 0) {
+        const dbBadges = localBadges.map(item => mapLocalToDb('badges', item)).filter(Boolean);
+        upsertPromises.push(client.from('badges').upsert(dbBadges));
+      }
+      if (localAudits.length > 0) {
+        const dbAudits = localAudits.map(item => mapLocalToDb('audit_trails', item)).filter(Boolean);
+        upsertPromises.push(client.from('audit_trails').upsert(dbAudits));
+      }
 
       const results = await Promise.all(upsertPromises);
       for (const res of results) {
@@ -470,10 +710,22 @@ export async function performSmartSync(silent = true) {
 
     // Mirror to Supabase to align all records
     const syncPromises = [];
-    if (mergedMembers.length > 0) syncPromises.push(client.from('members').upsert(mergedMembers));
-    if (mergedLogs.length > 0) syncPromises.push(client.from('activity_logs').upsert(mergedLogs));
-    if (mergedBadges.length > 0) syncPromises.push(client.from('badges').upsert(mergedBadges));
-    if (mergedAudits.length > 0) syncPromises.push(client.from('audit_trails').upsert(mergedAudits));
+    if (mergedMembers.length > 0) {
+      const dbMembers = mergedMembers.map(item => mapLocalToDb('members', item)).filter(Boolean);
+      syncPromises.push(client.from('members').upsert(dbMembers));
+    }
+    if (mergedLogs.length > 0) {
+      const dbLogs = mergedLogs.map(item => mapLocalToDb('activity_logs', item)).filter(Boolean);
+      syncPromises.push(client.from('activity_logs').upsert(dbLogs));
+    }
+    if (mergedBadges.length > 0) {
+      const dbBadges = mergedBadges.map(item => mapLocalToDb('badges', item)).filter(Boolean);
+      syncPromises.push(client.from('badges').upsert(dbBadges));
+    }
+    if (mergedAudits.length > 0) {
+      const dbAudits = mergedAudits.map(item => mapLocalToDb('audit_trails', item)).filter(Boolean);
+      syncPromises.push(client.from('audit_trails').upsert(dbAudits));
+    }
 
     const syncResults = await Promise.all(syncPromises);
     for (const res of syncResults) {
@@ -527,19 +779,23 @@ export async function pushToSupabase() {
     const auditTrails = getAuditTrails();
 
     if (members.length > 0) {
-      const { error: mErr } = await client.from('members').upsert(members);
+      const dbMembers = members.map(item => mapLocalToDb('members', item)).filter(Boolean);
+      const { error: mErr } = await client.from('members').upsert(dbMembers);
       if (mErr) throw new Error(`Members Sync Error: ${mErr.message}`);
     }
     if (logs.length > 0) {
-      const { error: lErr } = await client.from('activity_logs').upsert(logs);
+      const dbLogs = logs.map(item => mapLocalToDb('activity_logs', item)).filter(Boolean);
+      const { error: lErr } = await client.from('activity_logs').upsert(dbLogs);
       if (lErr) throw new Error(`Logs Sync Error: ${lErr.message}`);
     }
     if (badges.length > 0) {
-      const { error: bErr } = await client.from('badges').upsert(badges);
+      const dbBadges = badges.map(item => mapLocalToDb('badges', item)).filter(Boolean);
+      const { error: bErr } = await client.from('badges').upsert(dbBadges);
       if (bErr) throw new Error(`Badges Sync Error: ${bErr.message}`);
     }
     if (auditTrails.length > 0) {
-      const { error: aErr } = await client.from('audit_trails').upsert(auditTrails);
+      const dbAudits = auditTrails.map(item => mapLocalToDb('audit_trails', item)).filter(Boolean);
+      const { error: aErr } = await client.from('audit_trails').upsert(dbAudits);
       if (aErr) throw new Error(`Audit Sync Error: ${aErr.message}`);
     }
 

@@ -51,15 +51,13 @@ export function initializeDatabase() {
   }
 }
 
-// Low-level safe background persistence
-function asyncSaveToLocalStorage(key, data) {
-  setTimeout(() => {
-    try {
-      localStorage.setItem(key, JSON.stringify(data));
-    } catch (err) {
-      console.error(`Failed to persist key "${key}" to localStorage:`, err);
-    }
-  }, 0);
+// Low-level safe database persistence
+function saveToLocalStorage(key, data) {
+  try {
+    localStorage.setItem(key, JSON.stringify(data));
+  } catch (err) {
+    console.error(`Failed to persist key "${key}" to localStorage:`, err);
+  }
 }
 
 // Getters and Setters using Memory Caching
@@ -111,7 +109,7 @@ export function getMembers() {
 
 export function saveMembers(members, skipQueue = false) {
   dbCache.members = members;
-  asyncSaveToLocalStorage(STORAGE_KEYS.MEMBERS, members);
+  saveToLocalStorage(STORAGE_KEYS.MEMBERS, members);
   if (!skipQueue) {
     enqueueSyncJob('members', members);
   }
@@ -132,7 +130,7 @@ export function getActivityLogs() {
 
 export function saveActivityLogs(logs, skipQueue = false) {
   dbCache.logs = logs;
-  asyncSaveToLocalStorage(STORAGE_KEYS.LOGS, logs);
+  saveToLocalStorage(STORAGE_KEYS.LOGS, logs);
   if (!skipQueue) {
     enqueueSyncJob('activity_logs', logs);
   }
@@ -153,7 +151,7 @@ export function getAuditTrails() {
 
 export function saveAuditTrails(trails, skipQueue = false) {
   dbCache.audit = trails;
-  asyncSaveToLocalStorage(STORAGE_KEYS.AUDIT, trails);
+  saveToLocalStorage(STORAGE_KEYS.AUDIT, trails);
   if (!skipQueue) {
     enqueueSyncJob('audit_trails', trails);
   }
@@ -174,7 +172,7 @@ export function getBadges() {
 
 export function saveBadges(badges, skipQueue = false) {
   dbCache.badges = badges;
-  asyncSaveToLocalStorage(STORAGE_KEYS.BADGES, badges);
+  saveToLocalStorage(STORAGE_KEYS.BADGES, badges);
   if (!skipQueue) {
     enqueueSyncJob('badges', badges);
   }
