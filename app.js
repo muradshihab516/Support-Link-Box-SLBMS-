@@ -11,7 +11,8 @@ import {
 } from './src/database.js';
 import { 
   getSupabase, setupSupabaseRealtime, initSupabaseConfig, testSupabaseConnection, 
-  performSmartSync, pullFromSupabase, silentPullFromSupabase, pushToSupabase, enqueueSyncJob
+  performSmartSync, pullFromSupabase, silentPullFromSupabase, pushToSupabase, enqueueSyncJob,
+  wipeDatabaseAll
 } from './src/supabase.js';
 import { 
   handleAddMember, handleBulkAddMembers, parseBulkActivityText, submitBulkActivity 
@@ -783,6 +784,27 @@ function renderTabContent(totalCount, activeCount, inactiveCount, diamondCount) 
                   <div>📝 Activity Logs: <span class="text-white font-bold">${totalLogsCount}</span></div>
                   <div>🏅 Badges: <span class="text-white font-bold">${totalBadgesCount}</span></div>
                   <div>🛡️ Audit Trails: <span class="text-white font-bold">${totalAuditsCount}</span></div>
+                </div>
+              </div>
+
+              <!-- Danger Zone Section -->
+              <div class="bg-rose-950/20 border border-rose-950 rounded-xl p-4 space-y-3">
+                <h4 class="font-bold text-rose-400 text-xs flex items-center gap-1.5 uppercase tracking-wider">
+                  <i data-lucide="alert-triangle" class="w-4 h-4 text-rose-400 animate-pulse"></i> Danger Zone / ডাটা রিসেট এরিয়া
+                </h4>
+                <p class="text-[10px] text-slate-400 leading-relaxed">
+                  আপনি যদি Supabase ডাটাবেজ বা ব্রাউজার ক্যাশ রিসেট করে একদম নতুনভাবে কাজ শুরু করতে চান, তবে নিচের অপশনগুলো ব্যবহার করুন:
+                </p>
+                <div class="flex flex-col gap-2 pt-1">
+                  <!-- Button 1: Wipe Local Storage Only -->
+                  <button id="wipe-local-cache-btn" class="w-full bg-slate-950 hover:bg-slate-900 border border-rose-900/30 hover:border-rose-500/40 text-rose-400 font-bold text-[11px] py-2.5 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer">
+                    <i data-lucide="trash-2" class="w-3.5 h-3.5"></i> লোকাল ব্রাউজার ক্যাশ রিসেট (Wipe Local)
+                  </button>
+                  
+                  <!-- Button 2: Wipe Both Local + Supabase -->
+                  <button id="wipe-all-sys-btn" class="w-full bg-rose-950/40 hover:bg-rose-900/40 border border-rose-700/50 hover:border-rose-500 text-rose-300 hover:text-white font-bold text-[11px] py-2.5 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer">
+                    <i data-lucide="alert-triangle" class="w-3.5 h-3.5"></i> লোকাল + ক্লাউড ডাটা সম্পূর্ণ মুছুন (Full Wipe)
+                  </button>
                 </div>
               </div>
             </div>
@@ -2580,8 +2602,8 @@ function bindEvents() {
       
       const attemptUnlock = () => {
         if (passInp) {
-          const pass = passInp.value;
-          if (pass === 'Sm.Shihab211') {
+          const pass = passInp.value.trim();
+          if (pass === 'Sm.Shihab211' || pass.toLowerCase() === 'sm.shihab211' || pass.toLowerCase() === 'shihab211') {
             sessionStorage.setItem('developer_unlocked', 'true');
             updateState({ developerUnlocked: true });
           } else {
@@ -2739,6 +2761,65 @@ function bindEvents() {
           },
           null,
           'ক্লাউড ডেটা নামান'
+        );
+      };
+    }
+
+    // Wipe Local Cache Only button handler
+    const wipeLocalCacheBtn = document.getElementById('wipe-local-cache-btn');
+    if (wipeLocalCacheBtn) {
+      wipeLocalCacheBtn.onclick = () => {
+        showConfirm(
+          'আপনি কি সত্যিই আপনার ব্রাউজারের লোকাল ক্যাশ সম্পূর্ণ মুছে ফেলতে চান? (ক্লাউড Supabase-এর কোনো ডেটা ডিলিট হবে না)',
+          async () => {
+            try {
+              await wipeDatabaseAll(false);
+              initializeDatabase();
+              loadStateFromStorage();
+              updateState({
+                members: [],
+                auditTrails: getAuditTrails()
+              });
+              showToast('ব্রাউজার লোকাল ক্যাশ সফলভাবে রিসেট করা হয়েছে!', 'success');
+            } catch (err) {
+              showToast(`রিসেট করতে ব্যর্থ হয়েছে: ${err.message}`, 'error');
+            }
+          },
+          null,
+          'লোকাল ক্যাশ মুছুন'
+        );
+      };
+    }
+
+    // Wipe Both Local + Supabase Database button handler
+    const wipeAllSysBtn = document.getElementById('wipe-all-sys-btn');
+    if (wipeAllSysBtn) {
+      wipeAllSysBtn.onclick = () => {
+        showConfirm(
+          'সতর্কতা! আপনি কি সত্যিই লোকাল ব্রাউজার ক্যাশ এবং ক্লাউড Supabase ডাটাবেজের সমস্ত রেকর্ড সম্পূর্ণভাবে মুছে ফেলতে চান? এটি সমস্ত মেম্বার এবং অ্যাক্টিভিটি ডেটা পার্মানেন্টলি ডিলিট করবে!',
+          () => {
+            showConfirm(
+              'আপনি কি চূড়ান্তভাবে নিশ্চিত? এই কাজটি করার সাথে সাথে ক্লাউড Supabase থেকে সমস্ত ডেটা ডিলিট হয়ে যাবে এবং এটি আর ফেরত পাওয়া সম্ভব নয়!',
+              async () => {
+                try {
+                  await wipeDatabaseAll(true);
+                  initializeDatabase();
+                  loadStateFromStorage();
+                  updateState({
+                    members: [],
+                    auditTrails: getAuditTrails()
+                  });
+                  showToast('লোকাল এবং ক্লাউড Supabase ডাটাবেজ সফলভাবে সম্পূর্ণ রিসেট করা হয়েছে!', 'success');
+                } catch (err) {
+                  showToast(`সম্পূর্ণ রিসেট ব্যর্থ হয়েছে: ${err.message}`, 'error');
+                }
+              },
+              null,
+              'হ্যাঁ, সম্পূর্ণ মুছুন'
+            );
+          },
+          null,
+          'হ্যাঁ, সম্পূর্ণ ডিলিট করুন'
         );
       };
     }
@@ -2936,8 +3017,8 @@ function renderLoginPage() {
           <i data-lucide="help-circle" class="w-4.5 h-4.5 text-indigo-400 shrink-0 mt-0.5"></i>
           <p class="text-[10px] text-slate-400 leading-relaxed font-medium">
             <strong class="text-indigo-300">정보 / তথ্য নির্দেশিকা:</strong> <br/>
-            ১. Supabase-এ <code class="bg-slate-950 px-1 py-0.5 rounded text-indigo-400 border border-indigo-900/50 font-mono">admins</code> টেবিল থাকলে সেখান থেকে ক্লাউড ইমেইল ও পাসওয়ার্ড যাচাই করা হবে। <br/>
-            ২. ডাটাবেজ কানেক্ট না থাকলে, উপরের যেকোনো এডমিনের সাথে ডিফল্ট পাসওয়ার্ড (যেমন: <code class="bg-slate-950 px-1 py-0.5 rounded text-indigo-400 border border-indigo-900/50 font-mono">linkbox123</code> বা <code class="bg-slate-950 px-1 py-0.5 rounded text-indigo-400 border border-indigo-900/50 font-mono">123456</code>) ব্যবহার করে সাথে সাথে লগইন করা যাবে।
+            ১. আপনার এডমিন প্যানেলে নিরাপদ প্রবেশ নিশ্চিত করতে সঠিক এডমিন ইমেইল ও পাসওয়ার্ড ব্যবহার করুন। <br/>
+            ২. Supabase ক্লাউড ডাটাবেজ কানেকশন অ্যাক্টিভ থাকলে সরাসরি ডাটাবেজ থেকে তথ্য ভেরিফাই করা হবে।
           </p>
         </div>
       </div>

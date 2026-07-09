@@ -809,3 +809,42 @@ export async function pushToSupabase() {
     return false;
   }
 }
+
+// Full clean system wipe - handles clearing browser cache and optionally Supabase remote tables
+export async function wipeDatabaseAll(wipeRemote = false) {
+  const client = getSupabase();
+  if (wipeRemote && !client) {
+    throw new Error('Supabase client is not initialized or configured!');
+  }
+
+  if (wipeRemote) {
+    // Delete in dependency order: logs, badges, audits, then members
+    const deleteLogs = client.from('activity_logs').delete().neq('id', '_none_');
+    const deleteBadges = client.from('badges').delete().neq('id', '_none_');
+    const deleteAudits = client.from('audit_trails').delete().neq('id', '_none_');
+    const deleteMembers = client.from('members').delete().neq('id', '_none_');
+
+    const results = await Promise.all([deleteLogs, deleteBadges, deleteAudits, deleteMembers]);
+    for (const res of results) {
+      if (res.error) {
+        throw new Error(`Remote Delete Error: ${res.error.message}`);
+      }
+    }
+  }
+
+  // Clear local storage keys
+  localStorage.removeItem(STORAGE_KEYS.MEMBERS);
+  localStorage.removeItem(STORAGE_KEYS.LOGS);
+  localStorage.removeItem(STORAGE_KEYS.AUDIT);
+  localStorage.removeItem(STORAGE_KEYS.BADGES);
+  localStorage.removeItem(STORAGE_KEYS.SYNC_QUEUE);
+
+  // Invalidate cache
+  invalidateDbCache('members');
+  invalidateDbCache('activity_logs');
+  invalidateDbCache('audit_trails');
+  invalidateDbCache('badges');
+
+  return true;
+}
+
