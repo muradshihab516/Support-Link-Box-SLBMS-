@@ -605,9 +605,9 @@ function renderTabContent(totalCount, activeCount, inactiveCount, diamondCount) 
       const copiedJsText = state.copiedJS ? 'Copied!' : 'Copy Code Snippet';
 
       const totalMembersCount = state.members.length;
-      const totalLogsCount = state.logs.length;
-      const totalBadgesCount = state.badges ? state.badges.length : 0;
-      const totalAuditsCount = state.auditTrails.length;
+      const totalLogsCount = getActivityLogs().length;
+      const totalBadgesCount = getBadges().length;
+      const totalAuditsCount = getAuditTrails().length;
 
       return `
         <div class="space-y-6">
