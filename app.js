@@ -15,7 +15,8 @@ import {
   wipeDatabaseAll
 } from './src/supabase.js';
 import { 
-  handleAddMember, handleBulkAddMembers, parseBulkActivityText, submitBulkActivity 
+  handleAddMember, handleBulkAddMembers, parseBulkActivityText, submitBulkActivity,
+  analyzeUnregisteredDuplicates
 } from './src/member.js';
 import { showToast } from './src/toast.js';
 import { showAlert, showConfirm } from './src/modal.js';
@@ -116,11 +117,12 @@ function render() {
     return;
   }
 
-  // Active overview statistics calculations
-  const totalCount = state.members.length;
-  const activeCount = state.members.filter(m => m.status === 'active').length;
-  const inactiveCount = state.members.filter(m => m.status === 'inactive' || m.status === 'warning').length;
-  const diamondCount = state.members.filter(m => m.level === 'Diamond').length;
+  // Active overview statistics calculations (Excluding frozen members)
+  const nonFrozenMembers = state.members.filter(m => m.status !== 'frozen');
+  const totalCount = nonFrozenMembers.length;
+  const activeCount = nonFrozenMembers.filter(m => m.status === 'active').length;
+  const inactiveCount = nonFrozenMembers.filter(m => m.status === 'inactive' || m.status === 'warning').length;
+  const diamondCount = nonFrozenMembers.filter(m => m.level === 'Diamond').length;
 
   container.innerHTML = `
     <!-- Sticky Admin Header Banner -->
@@ -531,6 +533,58 @@ function render() {
       </div>
     </div>
     ` : ''}
+
+    ${state.duplicateResolutionModal ? `
+    <!-- Custom beautiful duplicate resolution modal -->
+    <div id="duplicate-resolution-modal" class="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-[100] flex items-center justify-center p-4">
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl relative space-y-4 animate-scale-in max-h-[90vh] overflow-y-auto">
+        <div class="flex items-center gap-3 text-amber-500 border-b border-slate-800 pb-3">
+          <i data-lucide="alert-triangle" class="w-6 h-6 animate-pulse"></i>
+          <h3 class="font-extrabold text-slate-100 text-sm tracking-wide uppercase">⚠️ Duplicate Member Name Detected</h3>
+        </div>
+        <p class="text-[11px] text-slate-300 font-medium leading-relaxed">
+          নিচের নামগুলো একাধিকবার পাওয়া গেছে। অনুগ্রহ করে প্রতিটি Member-এর জন্য আলাদা নাম নির্ধারণ করুন অথবা প্রয়োজনে Skip করুন।
+        </p>
+
+        <div class="space-y-4 divide-y divide-slate-800/60 max-h-[50vh] overflow-y-auto pr-1">
+          ${state.duplicateResolutionModal.duplicates.map((dup, dupIdx) => `
+            <div class="pt-3 space-y-3">
+              <div class="flex items-center justify-between">
+                <span class="text-xs font-bold text-amber-400 font-mono">@${dup.name} (${dup.count} বার পাওয়া গেছে)</span>
+              </div>
+              
+              <div class="space-y-2.5">
+                ${dup.occurrences.map((occ, occIdx) => `
+                  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-950/50 p-3 rounded-xl border border-slate-800/40">
+                    <span class="text-[10px] text-slate-400 font-mono">Occur ${occIdx + 1}</span>
+                    
+                    <div class="flex items-center gap-2 flex-grow sm:justify-end">
+                      ${occ.skipped ? `
+                        <span class="text-[10px] text-rose-400 font-bold bg-rose-500/10 px-2 py-1 rounded">Skipped</span>
+                        <button class="toggle-skip-btn text-[9px] bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 py-1.5 rounded-lg font-bold cursor-pointer" data-dup-idx="${dupIdx}" data-occ-idx="${occIdx}">Undo Skip</button>
+                      ` : `
+                        <input type="text" value="${occ.resolvedName}" class="rename-occ-input bg-slate-900 border border-slate-800 text-xs px-2.5 py-1.5 rounded-lg text-slate-200 font-semibold focus:outline-none focus:border-indigo-500 w-full max-w-[180px]" data-dup-idx="${dupIdx}" data-occ-idx="${occIdx}" />
+                        <button class="toggle-skip-btn text-[9px] bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 px-2.5 py-1.5 rounded-lg border border-rose-500/20 font-semibold cursor-pointer" data-dup-idx="${dupIdx}" data-occ-idx="${occIdx}">Skip</button>
+                      `}
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          `).join('')}
+        </div>
+
+        <div class="flex justify-end gap-3 pt-3 border-t border-slate-800">
+          <button id="dup-resolve-cancel-btn" class="bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-[10px] px-4 py-2.5 rounded-xl transition cursor-pointer">
+            বাতিল
+          </button>
+          <button id="dup-resolve-save-btn" class="bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-[10px] px-5 py-2.5 rounded-xl shadow-lg transition cursor-pointer">
+            সংরক্ষণ করুন
+          </button>
+        </div>
+      </div>
+    </div>
+    ` : ''}
   `;
 
   // Hot Reload Icons
@@ -934,6 +988,13 @@ export const supabase = createClient(supabaseUrl, supabaseKey)
           m.member_number.toString().includes(queryCleaned)
         );
         
+        if (state.memberFilterStatus === 'frozen') {
+          return matchesQuery && m.status === 'frozen';
+        }
+
+        // Hide frozen members from all other views
+        if (m.status === 'frozen') return false;
+        
         if (state.memberFilterStatus === 'all') return matchesQuery;
         if (state.memberFilterStatus === 'active') return matchesQuery && m.status === 'active';
         if (state.memberFilterStatus === 'warning') return matchesQuery && m.status === 'warning';
@@ -1067,6 +1128,7 @@ export const supabase = createClient(supabaseUrl, supabaseKey)
                 { id: 'active', label: 'Active' },
                 { id: 'warning', label: 'Warning (7+ Days)' },
                 { id: 'inactive', label: 'Inactive (12+ Days)' },
+                { id: 'frozen', label: '❄️ Frozen' },
                 { id: 'diamond', label: '💎 Diamond' },
                 { id: 'gold', label: '⭐ Gold' },
                 { id: 'silver', label: '🥈 Silver' },
@@ -1108,7 +1170,9 @@ export const supabase = createClient(supabaseUrl, supabaseKey)
                     <td class="py-3 px-5 text-center">
                       <span class="inline-block text-[9px] font-bold uppercase px-2 py-0.5 rounded ${
                         m.status === 'active' ? 'bg-emerald-500/10 text-emerald-400' :
-                        m.status === 'warning' ? 'bg-amber-500/10 text-amber-400' : 'bg-rose-500/10 text-rose-400'
+                        m.status === 'warning' ? 'bg-amber-500/10 text-amber-400' :
+                        m.status === 'frozen' ? 'bg-blue-500/10 text-blue-400' :
+                        'bg-rose-500/10 text-rose-400'
                       }">● ${m.status}</span>
                     </td>
                     <td class="py-3 px-5 text-center font-mono text-xs ${m.consecutive_inactive_days > 0 ? 'text-rose-400 font-bold' : 'text-slate-500'}">
@@ -1280,8 +1344,8 @@ export const supabase = createClient(supabaseUrl, supabaseKey)
 
     // TAB: NOTICE GENERATOR
     case 'notices': {
-      // Inactive members query calculations
-      const warningMembers = state.members.filter(m => m.consecutive_inactive_days >= state.noticeFilterDays);
+      // Inactive members query calculations (Excluding frozen members)
+      const warningMembers = state.members.filter(m => m.status !== 'frozen' && m.consecutive_inactive_days >= state.noticeFilterDays);
       
       const formatWarningNotice = () => {
         const dateStr = new Date().toLocaleDateString('bn-BD', { day: 'numeric', month: 'long', year: 'numeric' });
@@ -1342,26 +1406,72 @@ ${listText}
             </button>
           </div>
 
-          <!-- Notice Content Box -->
-          <div class="lg:col-span-8 bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl flex flex-col justify-between">
-            <div class="space-y-4 flex flex-col h-full justify-between">
+          <!-- Notice Content Box & Freeze Panel stacked -->
+          <div class="lg:col-span-8 space-y-6">
+            <!-- Notice Output -->
+            <div class="bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-4">
               <div class="flex justify-between items-center border-b border-slate-800 pb-3">
-                <span class="text-xs font-bold text-slate-400 flex items-center gap-1.5 uppercase tracking-wider">
+                <span class="text-xs font-bold text-slate-400 flex items-center gap-1.5 uppercase tracking-wider font-sans">
                   <i data-lucide="calendar" class="w-3.5 h-3.5 text-indigo-400"></i> Notice Output
                 </span>
                 <span class="text-[10px] text-slate-500 font-bold font-mono uppercase">${warningMembers.length} Inactive Found</span>
               </div>
 
-              <div class="bg-slate-950 rounded-xl p-4 border border-slate-800 max-h-[350px] overflow-y-auto font-mono text-[11px] text-slate-300 whitespace-pre-wrap leading-relaxed select-all">
+              <div class="bg-slate-950 rounded-xl p-4 border border-slate-800 max-h-[250px] overflow-y-auto font-mono text-[11px] text-slate-300 whitespace-pre-wrap leading-relaxed select-all">
                 ${formatWarningNotice()}
               </div>
 
-              <div class="bg-indigo-500/5 border border-indigo-500/10 rounded-xl p-3 flex gap-2 items-start mt-2">
+              <div class="bg-indigo-500/5 border border-indigo-500/10 rounded-xl p-3 flex gap-2 items-start">
                 <i data-lucide="alert-triangle" class="w-4 h-4 text-indigo-400 flex-shrink-0 mt-0.5"></i>
-                <p class="text-[10px] text-slate-500 leading-relaxed">
-                  <strong class="text-indigo-400">গুরুত্বপূর্ণ ফিক্স:</strong> নোটিশে মেম্বারদের নামের পাশে তাদের সঠিক ইনেক্টিভ দিনসমূহ (যেমন: ৭ দিন, ৯ দিন, ১২ দিন) নির্ভুলভাবে প্রদর্শন করা হয়েছে। এটি ডুপ্লিকেট এন্ট্রি এবং সাধারণ ওয়ার্নিং সংখ্যা ফিক্সড রাখার ত্রুটি দূর করেছে।
+                <p class="text-[10px] text-slate-500 leading-relaxed font-sans">
+                  <strong class="text-indigo-400">গুরুত্বপূর্ণ ফিক্স:</strong> নোটিশে মেম্বারদের নামের পাশে তাদের সঠিক ইনেক্টিভ দিনসমূহ নির্ভুলভাবে প্রদর্শন করা হয়েছে। এটি ডুপ্লিকেট এন্ট্রি দূর করেছে।
                 </p>
               </div>
+            </div>
+
+            <!-- Freeze Members Panel -->
+            <div class="bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-4">
+              <div class="flex justify-between items-center border-b border-slate-800 pb-3">
+                <h4 class="text-xs font-bold text-slate-100 uppercase tracking-wider flex items-center gap-1.5 font-sans">
+                  <i data-lucide="snowflake" class="w-4 h-4 text-rose-400"></i>
+                  নিষ্ক্রিয় মেম্বার ফ্রিজ করুন (Freeze Members)
+                </h4>
+                <span class="text-[9px] bg-rose-500/10 text-rose-400 border border-rose-500/20 px-2 py-0.5 rounded font-black uppercase font-mono">Select & Freeze</span>
+              </div>
+
+              <p class="text-xs text-slate-400 leading-relaxed font-sans">
+                আপনি যে মেম্বারদের ফেসবুক গ্রুপ থেকে রিমুভ (Kick) করেছেন, তাদের নামের পাশের বক্সে টিক দিন এবং নিচের <b>Freeze Selected</b> বাটনে ক্লিক করুন। ফ্রোজেন মেম্বাররা কোনো নোটিশ, লিডারবোর্ড বা ডিরেক্টরিতে আর অন্তর্ভুক্ত হবে না।
+              </p>
+
+              <div class="max-h-[200px] overflow-y-auto space-y-2 pr-1 font-mono text-xs">
+                ${warningMembers.length > 0 ? warningMembers.map(m => {
+                  const isChecked = (state.selectedFreezeMemberIds || []).includes(m.id);
+                  return `
+                    <label class="flex items-center justify-between p-2.5 bg-slate-950/50 border ${isChecked ? 'border-rose-500/35 bg-rose-500/5' : 'border-slate-800'} rounded-xl hover:border-slate-700 transition cursor-pointer select-none">
+                      <div class="flex items-center gap-3">
+                        <input type="checkbox" data-freeze-member-id="${m.id}" ${isChecked ? 'checked' : ''} class="w-4 h-4 text-indigo-600 bg-slate-950 border-slate-800 rounded focus:ring-indigo-500 cursor-pointer" />
+                        <div>
+                          <span class="text-slate-200 font-bold font-sans">${m.name}</span>
+                          <span class="text-[10px] text-slate-500 ml-1.5 font-mono">No.${m.member_number}</span>
+                        </div>
+                      </div>
+                      <span class="text-rose-400 font-bold bg-rose-500/5 px-2 py-0.5 rounded border border-rose-500/10">${m.consecutive_inactive_days} দিন ইনেক্টিভ</span>
+                    </label>
+                  `;
+                }).join('') : `
+                  <p class="text-xs text-slate-600 text-center py-6 font-sans">কোনো নিষ্ক্রিয় মেম্বার নেই।</p>
+                `}
+              </div>
+
+              ${warningMembers.length > 0 ? `
+                <div class="flex justify-between items-center pt-2">
+                  <span class="text-[10px] text-slate-500 font-bold uppercase font-mono" id="freeze-selected-count">${(state.selectedFreezeMemberIds || []).length} Selected</span>
+                  <button id="freeze-selected-btn" ${state.selectedFreezeMemberIds.length === 0 ? 'disabled' : ''} class="bg-rose-600 hover:bg-rose-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-extrabold text-xs px-5 py-2.5 rounded-xl transition cursor-pointer flex items-center gap-1.5 shadow-[0_4px_12px_rgba(244,63,94,0.2)]">
+                    <i data-lucide="snowflake" class="w-4 h-4"></i>
+                    Freeze Selected (${state.selectedFreezeMemberIds.length})
+                  </button>
+                </div>
+              ` : ''}
             </div>
           </div>
 
@@ -1935,6 +2045,103 @@ function bindEvents() {
     };
   }
 
+  // Duplicate resolution modal interactive events
+  if (state.duplicateResolutionModal) {
+    // Save button
+    const dupSaveBtn = document.getElementById('dup-resolve-save-btn');
+    if (dupSaveBtn) {
+      dupSaveBtn.onclick = () => {
+        const onResolve = state.duplicateResolutionModal.onResolve;
+        const duplicates = state.duplicateResolutionModal.duplicates;
+        
+        const allResolvedNames = [];
+        let hasValidationError = false;
+        let validationMsg = '';
+        
+        duplicates.forEach(dup => {
+          dup.occurrences.forEach(occ => {
+            if (!occ.skipped) {
+              const nameClean = occ.resolvedName.trim();
+              if (!nameClean) {
+                hasValidationError = true;
+                validationMsg = 'মেম্বার এর নাম ফাঁকা হতে পারে না!';
+              }
+              if (allResolvedNames.includes(nameClean.toLowerCase())) {
+                hasValidationError = true;
+                validationMsg = `"${nameClean}" নামটি একাধিকবার ব্যবহার করা হয়েছে। প্রতিটি মেম্বার এর নাম ইউনিক হতে হবে!`;
+              }
+              const existingInDb = state.members.some(m => m.name.toLowerCase() === nameClean.toLowerCase());
+              if (existingInDb) {
+                hasValidationError = true;
+                validationMsg = `"${nameClean}" নামের মেম্বার ইতিমধ্যে ডাটাবেজে রেজিস্টার আছে! অনুগ্রহ করে ইউনিক নাম দিন।`;
+              }
+              allResolvedNames.push(nameClean.toLowerCase());
+            }
+          });
+        });
+        
+        if (hasValidationError) {
+          showToast(validationMsg, 'error');
+          return;
+        }
+        
+        updateState({ duplicateResolutionModal: null });
+        if (onResolve) {
+          onResolve(duplicates);
+        }
+      };
+    }
+
+    // Cancel button
+    const dupCancelBtn = document.getElementById('dup-resolve-cancel-btn');
+    if (dupCancelBtn) {
+      dupCancelBtn.onclick = () => {
+        updateState({ duplicateResolutionModal: null });
+        showToast('ডুপ্লিকেট মেম্বার সমাধান বাতিল করা হয়েছে।', 'info');
+      };
+    }
+
+    // Input changes
+    document.querySelectorAll('.rename-occ-input').forEach(inp => {
+      inp.oninput = (e) => {
+        const dupIdx = parseInt(e.target.getAttribute('data-dup-idx'), 10);
+        const occIdx = parseInt(e.target.getAttribute('data-occ-idx'), 10);
+        const value = e.target.value;
+        
+        const nextDuplicates = [...state.duplicateResolutionModal.duplicates];
+        nextDuplicates[dupIdx].occurrences[occIdx].resolvedName = value;
+        updateState({
+          duplicateResolutionModal: {
+            ...state.duplicateResolutionModal,
+            duplicates: nextDuplicates
+          }
+        });
+        const refreshedInput = document.querySelector(`.rename-occ-input[data-dup-idx="${dupIdx}"][data-occ-idx="${occIdx}"]`);
+        if (refreshedInput) {
+          refreshedInput.focus();
+          refreshedInput.setSelectionRange(value.length, value.length);
+        }
+      };
+    });
+
+    // Skip / Undo toggle
+    document.querySelectorAll('.toggle-skip-btn').forEach(btn => {
+      btn.onclick = (e) => {
+        const dupIdx = parseInt(e.currentTarget.getAttribute('data-dup-idx'), 10);
+        const occIdx = parseInt(e.currentTarget.getAttribute('data-occ-idx'), 10);
+        
+        const nextDuplicates = [...state.duplicateResolutionModal.duplicates];
+        nextDuplicates[dupIdx].occurrences[occIdx].skipped = !nextDuplicates[dupIdx].occurrences[occIdx].skipped;
+        updateState({
+          duplicateResolutionModal: {
+            ...state.duplicateResolutionModal,
+            duplicates: nextDuplicates
+          }
+        });
+      };
+    });
+  }
+
   // Tab change button event delegation
   document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.onclick = (e) => {
@@ -1942,7 +2149,8 @@ function bindEvents() {
       updateState({ 
         currentTab: targetTab,
         isFabOpen: false,
-        isHeaderMenuOpen: false
+        isHeaderMenuOpen: false,
+        selectedFreezeMemberIds: []
       });
     };
   });
@@ -2313,13 +2521,238 @@ function bindEvents() {
     const saveBtn = document.getElementById('save-activity-btn');
     if (saveBtn) {
       saveBtn.onclick = () => {
+        // Run unregistered duplicates analysis first
+        const duplicates = analyzeUnregisteredDuplicates(state.bulkInputText);
+        
+        if (duplicates.length > 0) {
+          // Construct duplicates list with default occurrences
+          const modalDuplicates = duplicates.map(d => {
+            const occurrences = [];
+            for (let i = 0; i < d.count; i++) {
+              occurrences.push({
+                id: i,
+                originalName: d.name,
+                resolvedName: `${d.name} ${i + 1}`, // Default proposal: "Rakib Islam 1", "Rakib Islam 2"
+                skipped: false
+              });
+            }
+            return {
+              name: d.name,
+              count: d.count,
+              occurrences
+            };
+          });
+
+          updateState({
+            duplicateResolutionModal: {
+              duplicates: modalDuplicates,
+              onResolve: (resolvedDuplicates) => {
+                // Helper to escape regex
+                const escapeRegExp = (string) => {
+                  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                };
+
+                // 1. Bulk register the resolved names!
+                const members = getMembers();
+                const auditTrails = getAuditTrails();
+                const adminName = ADMIN_NAMES[state.currentAdminEmail] || 'Unknown Admin';
+                let maxMemberNum = members.reduce((max, m) => m.member_number > max ? m.member_number : max, 0);
+
+                resolvedDuplicates.forEach(dup => {
+                  dup.occurrences.forEach(occ => {
+                    if (!occ.skipped) {
+                      maxMemberNum++;
+                      const cleaned = cleanName(occ.resolvedName);
+                      members.push({
+                        id: generateUUID(),
+                        name: cleaned,
+                        display_name: `@${cleaned.replace(/\s+/g, '')}`,
+                        member_number: maxMemberNum,
+                        status: 'active',
+                        level: CONFIG.LEVELS.BRONZE,
+                        total_points: 0,
+                        current_streak: 0,
+                        longest_streak: 0,
+                        total_active_days: 0,
+                        last_active_date: null,
+                        consecutive_inactive_days: 0,
+                        notes: '',
+                        created_at: new Date().toISOString(),
+                        updated_at: new Date().toISOString()
+                      });
+
+                      auditTrails.unshift({
+                        id: `audit-${generateUUID()}`,
+                        admin_email: state.currentAdminEmail,
+                        admin_name: adminName,
+                        action: 'ADD_MEMBER',
+                        entity_type: 'MEMBER',
+                        description: `Registered resolved duplicate member: ${cleaned} (No. ${maxMemberNum})`,
+                        timestamp: new Date().toISOString()
+                      });
+                    }
+                  });
+                });
+
+                saveMembers(members);
+                saveAuditTrails(auditTrails);
+
+                showToast('ডুপ্লিকেট মেম্বারদের ইউনিক নাম দিয়ে রেজিস্টার করা হয়েছে!', 'success');
+
+                // 2. Map the occurrences in the daily submission activity list!
+                let nextText = state.bulkInputText;
+                
+                resolvedDuplicates.forEach(dup => {
+                  dup.occurrences.forEach(occ => {
+                    const regex = new RegExp(`@${escapeRegExp(dup.name)}`, 'i');
+                    if (occ.skipped) {
+                      nextText = nextText.replace(regex, '');
+                    } else {
+                      nextText = nextText.replace(regex, `@${occ.resolvedName}`);
+                    }
+                  });
+                });
+
+                updateState({
+                  bulkInputText: nextText,
+                  members: getMembers(),
+                  auditTrails: getAuditTrails()
+                });
+
+                // 3. Re-run parsing on the updated text and proceed
+                const { matchedMembers } = parseBulkActivityText(nextText);
+                if (matchedMembers.length === 0) return;
+
+                const frozenInList = matchedMembers.filter(m => m.status === 'frozen');
+                
+                const proceedWithSubmission = () => {
+                  if (frozenInList.length > 0) {
+                    const checkAndProcessFrozen = (index, currentMatchedIds, toReactivateIds) => {
+                      if (index >= frozenInList.length) {
+                        if (toReactivateIds.length > 0) {
+                          const mList = getMembers();
+                          toReactivateIds.forEach(id => {
+                            const idx = mList.findIndex(m => m.id === id);
+                            if (idx !== -1) {
+                              mList[idx].status = 'active';
+                              mList[idx].consecutive_inactive_days = 0;
+                              mList[idx].updated_at = new Date().toISOString();
+                            }
+                          });
+                          saveMembers(mList);
+                          showToast(`${toReactivateIds.length} জন ফ্রোজেন মেম্বার পুনরায় একটিভ করা হয়েছে।`, 'success');
+                        }
+
+                        const finalActiveIds = currentMatchedIds.filter(id => {
+                          const isFrozen = frozenInList.some(f => f.id === id);
+                          if (isFrozen) {
+                            return toReactivateIds.includes(id);
+                          }
+                          return true;
+                        });
+
+                        submitBulkActivity(state.bulkInputDate, finalActiveIds);
+                        return;
+                      }
+
+                      const frozenMember = frozenInList[index];
+                      showConfirm(
+                        `Daily Submission List-এ ফ্রোজেন মেম্বার <b>${frozenMember.name}</b> (No. ${frozenMember.member_number}) সনাক্ত হয়েছে।<br><br>আপনি কি তাকে পুনরায় <b>Reactivate (সক্রিয়)</b> করতে চান নাকি <b>Ignore (উপেক্ষা)</b> করতে চান?`,
+                        () => {
+                          toReactivateIds.push(frozenMember.id);
+                          checkAndProcessFrozen(index + 1, currentMatchedIds, toReactivateIds);
+                        },
+                        () => {
+                          checkAndProcessFrozen(index + 1, currentMatchedIds, toReactivateIds);
+                        },
+                        'ফ্রিজড মেম্বার সনাক্ত হয়েছে',
+                        'Reactivate Member',
+                        'Ignore'
+                      );
+                    };
+
+                    checkAndProcessFrozen(0, matchedMembers.map(m => m.id), []);
+                  } else {
+                    submitBulkActivity(state.bulkInputDate, matchedMembers.map(m => m.id));
+                  }
+                };
+
+                showConfirm(
+                  `আপনি কি সত্যিই নির্বাচিত তারিখ (${state.bulkInputDate}) এ ${matchedMembers.length} জন মেম্বারের ডেইলি এক্টিভিটি সেভ করতে চান?`,
+                  () => {
+                    proceedWithSubmission();
+                  },
+                  null,
+                  'এক্টিভিটি সেভ করুন'
+                );
+              }
+            }
+          });
+          return;
+        }
+
+        // Standard flow when no duplicates exist
         const { matchedMembers } = parseBulkActivityText(state.bulkInputText);
         if (matchedMembers.length === 0) return;
         
-        showConfirm(
-          `আপনি কি সত্যিই নির্বাচিত তারিখ (${state.bulkInputDate}) এ ${matchedMembers.length} জন সক্রিয় মেম্বারের ডেইলি এক্টিভিটি সেভ করতে চান?`,
-          () => {
+        const frozenInList = matchedMembers.filter(m => m.status === 'frozen');
+        
+        const proceedWithSubmission = () => {
+          if (frozenInList.length > 0) {
+            const checkAndProcessFrozen = (index, currentMatchedIds, toReactivateIds) => {
+              if (index >= frozenInList.length) {
+                if (toReactivateIds.length > 0) {
+                  const members = getMembers();
+                  toReactivateIds.forEach(id => {
+                    const idx = members.findIndex(m => m.id === id);
+                    if (idx !== -1) {
+                      members[idx].status = 'active';
+                      members[idx].consecutive_inactive_days = 0;
+                      members[idx].updated_at = new Date().toISOString();
+                    }
+                  });
+                  saveMembers(members);
+                  showToast(`${toReactivateIds.length} জন ফ্রোজেন মেম্বার পুনরায় একটিভ করা হয়েছে।`, 'success');
+                }
+
+                const finalActiveIds = currentMatchedIds.filter(id => {
+                  const isFrozen = frozenInList.some(f => f.id === id);
+                  if (isFrozen) {
+                    return toReactivateIds.includes(id);
+                  }
+                  return true;
+                });
+
+                submitBulkActivity(state.bulkInputDate, finalActiveIds);
+                return;
+              }
+
+              const frozenMember = frozenInList[index];
+              showConfirm(
+                `Daily Submission List-এ ফ্রোজেন মেম্বার <b>${frozenMember.name}</b> (No. ${frozenMember.member_number}) সনাক্ত হয়েছে।<br><br>আপনি কি তাকে পুনরায় <b>Reactivate (সক্রিয়)</b> করতে চান নাকি <b>Ignore (উপেক্ষা)</b> করতে চান?`,
+                () => {
+                  toReactivateIds.push(frozenMember.id);
+                  checkAndProcessFrozen(index + 1, currentMatchedIds, toReactivateIds);
+                },
+                () => {
+                  checkAndProcessFrozen(index + 1, currentMatchedIds, toReactivateIds);
+                },
+                'ফ্রিজড মেম্বার সনাক্ত হয়েছে',
+                'Reactivate Member',
+                'Ignore'
+              );
+            };
+
+            checkAndProcessFrozen(0, matchedMembers.map(m => m.id), []);
+          } else {
             submitBulkActivity(state.bulkInputDate, matchedMembers.map(m => m.id));
+          }
+        };
+
+        showConfirm(
+          `আপনি কি সত্যিই নির্বাচিত তারিখ (${state.bulkInputDate}) এ ${matchedMembers.length} জন মেম্বারের ডেইলি এক্টিভিটি সেভ করতে চান?`,
+          () => {
+            proceedWithSubmission();
           },
           null,
           'এক্টিভিটি সেভ করুন'
@@ -2442,7 +2875,7 @@ function bindEvents() {
     const filterDaysSel = document.getElementById('notice-filter-days');
     if (filterDaysSel) {
       filterDaysSel.onchange = (e) => {
-        updateState({ noticeFilterDays: Number(e.target.value), copiedNotice: false });
+        updateState({ noticeFilterDays: Number(e.target.value), copiedNotice: false, selectedFreezeMemberIds: [] });
       };
     }
 
@@ -2460,6 +2893,70 @@ function bindEvents() {
           console.error('Clipboard copy failed:', err);
           showToast('ক্লিপবোর্ডে কপি করা যায়নি। অনুগ্রহ করে ম্যানুয়ালি সিলেক্ট করে কপি করুন।', 'error');
         });
+      };
+    }
+
+    // Toggle individual member freeze selection
+    document.querySelectorAll('[data-freeze-member-id]').forEach(chk => {
+      chk.onchange = (e) => {
+        const memberId = e.currentTarget.getAttribute('data-freeze-member-id');
+        let selectedList = [...(state.selectedFreezeMemberIds || [])];
+        if (e.target.checked) {
+          if (!selectedList.includes(memberId)) {
+            selectedList.push(memberId);
+          }
+        } else {
+          selectedList = selectedList.filter(id => id !== memberId);
+        }
+        updateState({ selectedFreezeMemberIds: selectedList });
+      };
+    });
+
+    // Freeze selected inactive members action handler
+    const freezeSelectedBtn = document.getElementById('freeze-selected-btn');
+    if (freezeSelectedBtn) {
+      freezeSelectedBtn.onclick = () => {
+        const selectedIds = state.selectedFreezeMemberIds || [];
+        if (selectedIds.length === 0) return;
+
+        showConfirm(
+          `আপনি কি নির্বাচিত ${selectedIds.length} জন নিষ্ক্রিয় মেম্বারকে Freeze করতে চান? ফ্রিজ করলে তারা আর কোনো নোটিশ বা লিডারবোর্ডে আসবে না।`,
+          () => {
+            const members = getMembers();
+            let frozenNames = [];
+            selectedIds.forEach(id => {
+              const idx = members.findIndex(m => m.id === id);
+              if (idx !== -1) {
+                members[idx].status = 'frozen';
+                members[idx].consecutive_inactive_days = 0;
+                members[idx].updated_at = new Date().toISOString();
+                frozenNames.push(members[idx].name);
+              }
+            });
+
+            saveMembers(members);
+
+            // Audit Trails log
+            const trails = getAuditTrails();
+            frozenNames.forEach(name => {
+              trails.unshift({
+                id: `audit-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+                admin_email: state.currentAdminEmail,
+                admin_name: ADMIN_NAMES[state.currentAdminEmail] || 'Admin',
+                action: 'FREEZE_MEMBER',
+                entity_type: 'MEMBER',
+                description: `Toggled status of ${name} to frozen (archived)`,
+                timestamp: new Date().toISOString()
+              });
+            });
+            saveAuditTrails(trails);
+
+            showToast(`${selectedIds.length} জন মেম্বারকে সফলভাবে Freeze করা হয়েছে।`, 'success');
+            updateState({ selectedFreezeMemberIds: [] });
+            loadStateFromStorage();
+            updateState({});
+          }
+        );
       };
     }
   }
@@ -2546,11 +3043,28 @@ function bindEvents() {
         }
 
         html2canvasFn(reportCard, {
-          scale: 2, // high crisp definitions
-          backgroundColor: '#020617', // deep dark theme
-          logging: true, // enable logging for diagnosing
+          scale: 3, // Ultra-high resolution crisp printing
+          backgroundColor: '#090d1f', // Premium slate background color
+          logging: false,
           useCORS: true,
-          allowTaint: false // allowTaint MUST be false to avoid SecurityError during .toDataURL()
+          allowTaint: false,
+          windowWidth: 1000, // Forces virtual wider window for desktop-grid ratio layouts
+          onclone: (clonedDoc) => {
+            const clonedCard = clonedDoc.getElementById('printable-report-card');
+            if (clonedCard) {
+              clonedCard.style.width = '750px';
+              clonedCard.style.padding = '36px';
+              clonedCard.style.borderRadius = '24px';
+              clonedCard.style.margin = '0 auto';
+              clonedCard.style.transform = 'none';
+              clonedCard.style.position = 'relative';
+              // Make sure any text is bright and visible
+              const textElements = clonedCard.querySelectorAll('p, span, h1, h2, h3, h4');
+              textElements.forEach(el => {
+                el.style.textRendering = 'optimizeLegibility';
+              });
+            }
+          }
         }).then(canvas => {
           const imgData = canvas.toDataURL('image/png');
           const blob = dataURLtoBlob(imgData);

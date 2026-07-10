@@ -207,6 +207,78 @@ export function parseBulkActivityText(text) {
   return { parsedNames, matchedMembers, unregisteredNames };
 }
 
+// Helper to analyze duplicate unregistered names from the raw input text
+export function analyzeUnregisteredDuplicates(text) {
+  if (!text) return [];
+  
+  // 1. Extract ALL parsed raw names (preserving duplicates)
+  const allParsedNames = [];
+  const regex = /@([^\n\r0-9📅📆✅👇🅾️➤〰️💤⚠️\r\n\t(@]+)/g;
+  let match;
+  while ((match = regex.exec(text)) !== null) {
+    const extracted = match[1].trim();
+    if (extracted && extracted.length > 1) {
+      const cleaned = extracted.replace(/^[➤\s]+/, '').trim();
+      const cleanedFinal = cleanName(cleaned);
+      if (cleanedFinal) {
+        allParsedNames.push(cleanedFinal);
+      }
+    }
+  }
+  
+  if (allParsedNames.length === 0) {
+    const parts = text.split('@');
+    for (let i = 1; i < parts.length; i++) {
+      const part = parts[i];
+      const namePartMatch = part.match(/^([^0-9📅📆✅👇🅾️➤〰️💤⚠️\r\n\t(@]+)/);
+      if (namePartMatch) {
+        const cleaned = namePartMatch[1].trim();
+        const cleanedFinal = cleanName(cleaned);
+        if (cleanedFinal && cleanedFinal.length > 1) {
+          allParsedNames.push(cleanedFinal);
+        }
+      }
+    }
+  }
+  
+  // 2. Filter out names that are already registered
+  const members = getMembers();
+  const unregisteredOccurrences = [];
+  
+  allParsedNames.forEach(rawName => {
+    const cleaned = cleanName(rawName);
+    const isRegistered = members.some(m => {
+      const normMName = getNormalizedName(m.name);
+      const normMDisplayName = getNormalizedName(m.display_name || '');
+      const normCleaned = getNormalizedName(cleaned);
+      return normMName === normCleaned || normMDisplayName === normCleaned;
+    });
+    
+    if (!isRegistered) {
+      unregisteredOccurrences.push(cleaned);
+    }
+  });
+  
+  // 3. Count frequencies
+  const frequencies = {};
+  unregisteredOccurrences.forEach(name => {
+    frequencies[name] = (frequencies[name] || 0) + 1;
+  });
+  
+  // 4. Extract duplicates (frequency >= 2)
+  const duplicates = [];
+  Object.keys(frequencies).forEach(name => {
+    if (frequencies[name] >= 2) {
+      duplicates.push({
+        name,
+        count: frequencies[name]
+      });
+    }
+  });
+  
+  return duplicates;
+}
+
 // ----------------------------------------------------
 // SUB-FUNCTIONS FOR MEMBER VALUE RECALCULATIONS (Point 6)
 // ----------------------------------------------------
@@ -246,6 +318,7 @@ export function calculateLevel(totalPoints) {
 }
 
 export function calculateStatus(member, isActive, dateStr) {
+  if (member && member.status === 'frozen') return 'frozen';
   if (isActive) return 'active';
 
   let inactiveDays = member.consecutive_inactive_days;
@@ -343,7 +416,11 @@ export function submitBulkActivity(dateStr, activeMemberIds) {
   let dynamicBadgesList = [...badges];
 
   const updatedMembers = members.map(member => {
+    // Keep frozen members exactly as they are unless they have been reactivated and matched as active
     const isActive = activeMemberIds.includes(member.id);
+    if (member.status === 'frozen' && !isActive) {
+      return member;
+    }
 
     if (isActive) {
       logs.push({

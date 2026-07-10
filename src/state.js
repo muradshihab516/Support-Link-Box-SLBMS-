@@ -41,6 +41,7 @@ let state = {
   showKeyInput: false,
   uncheckedUnregisteredNames: [],
   developerUnlocked: typeof sessionStorage !== 'undefined' && sessionStorage.getItem('developer_unlocked') === 'true',
+  selectedFreezeMemberIds: [],
   toast: null,
   confirmModal: null
 };
