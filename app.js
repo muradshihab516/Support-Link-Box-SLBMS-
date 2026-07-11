@@ -1895,9 +1895,14 @@ ${listText}
                     <!-- Header -->
                     <div class="flex flex-col sm:flex-row justify-between sm:items-start border-b border-slate-800 pb-5 gap-3">
                       <div>
-                        <span class="text-[10px] bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">
-                          Official Performance Card
-                        </span>
+                        <div class="flex flex-wrap items-center gap-2 mb-2">
+                          <span class="text-[11px] bg-gradient-to-r from-indigo-600 to-violet-600 text-white font-extrabold px-3 py-1 rounded-lg tracking-widest uppercase shadow-[0_2px_8px_rgba(79,70,229,0.4)]">
+                            Support Link Box
+                          </span>
+                          <span class="text-[9px] bg-slate-900 text-slate-400 border border-slate-800 px-2.5 py-1 rounded-lg font-bold uppercase tracking-wider font-mono">
+                            Official Card
+                          </span>
+                        </div>
                         <h2 class="text-xl md:text-2xl font-extrabold text-slate-100 mt-2 flex items-center gap-2">
                           ${selectedMember.name}
                         </h2>
@@ -1970,8 +1975,9 @@ ${listText}
                         ` : `
                           <p class="text-[11px] text-slate-500 italic py-2">No badges earned yet.</p>
                         `}
-                        <div class="border-t border-slate-800/50 pt-2 text-[10px] text-slate-500 font-mono">
-                          Generated: ${new Date().toISOString().split('T')[0]} | Support Link Box
+                        <div class="border-t border-slate-800/50 pt-3 flex items-center justify-between text-[10px] text-slate-500 font-mono">
+                          <span>Generated: ${new Date().toISOString().split('T')[0]}</span>
+                          <span class="text-indigo-400 font-black tracking-widest uppercase">★ Support Link Box ★</span>
                         </div>
                       </div>
                     </div>
@@ -3033,6 +3039,7 @@ function bindEvents() {
       if (!reportCard || !selectedMember) return;
 
       updateState({ isDownloadingReport: true });
+      showToast('ইমেজ তৈরি হচ্ছে...', 'info');
 
       setTimeout(() => {
         const html2canvasFn = window.html2canvas || (typeof html2canvas !== 'undefined' ? html2canvas : null);
@@ -3042,48 +3049,26 @@ function bindEvents() {
           return;
         }
 
+        const filename = `${selectedMember.name.replace(/\s+/g, '_')}_Performance_Card.png`;
+
         html2canvasFn(reportCard, {
-          scale: 3, // Ultra-high resolution crisp printing
-          backgroundColor: '#090d1f', // Premium slate background color
-          logging: false,
+          scale: 3,
           useCORS: true,
-          allowTaint: false,
-          windowWidth: 1000, // Forces virtual wider window for desktop-grid ratio layouts
-          onclone: (clonedDoc) => {
-            const clonedCard = clonedDoc.getElementById('printable-report-card');
-            if (clonedCard) {
-              clonedCard.style.width = '750px';
-              clonedCard.style.padding = '36px';
-              clonedCard.style.borderRadius = '24px';
-              clonedCard.style.margin = '0 auto';
-              clonedCard.style.transform = 'none';
-              clonedCard.style.position = 'relative';
-              // Make sure any text is bright and visible
-              const textElements = clonedCard.querySelectorAll('p, span, h1, h2, h3, h4');
-              textElements.forEach(el => {
-                el.style.textRendering = 'optimizeLegibility';
-              });
-            }
-          }
+          backgroundColor: null,
+          logging: false
         }).then(canvas => {
           const imgData = canvas.toDataURL('image/png');
-          const blob = dataURLtoBlob(imgData);
-          const blobUrl = blob ? URL.createObjectURL(blob) : imgData;
           
-          // 1. Attempt desktop direct download
-          try {
-            const link = document.createElement('a');
-            link.style.display = 'none';
-            document.body.appendChild(link);
-            link.download = `${selectedMember.name.replace(/\s+/g, '_')}_Performance_Card.png`;
-            link.href = blobUrl;
-            link.click();
-            document.body.removeChild(link);
-          } catch (e) {
-            console.warn('Direct file download link click failed:', e);
-          }
+          const a = document.createElement('a');
+          a.href = imgData;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
 
-          // 2. Open state modal with the image URL for mobile users or cross-origin fallbacks
+          showToast(`"${filename}" ডাউনলোড হচ্ছে!`, 'success');
+
+          // Open state modal with the image URL for mobile users or cross-origin fallbacks
           updateState({ 
             isDownloadingReport: false,
             generatedPngUrl: imgData,
@@ -3091,8 +3076,7 @@ function bindEvents() {
           });
         }).catch(err => {
           console.error('Canvas image generation failed:', err);
-          const errText = err && err.message ? err.message : String(err);
-          showToast(`ডাউনলোড ব্যর্থ হয়েছে: ${errText}`, 'error');
+          showToast('ইমেজ সেভ করতে সমস্যা হয়েছে।', 'error');
           updateState({ isDownloadingReport: false });
         });
       }, 400);
