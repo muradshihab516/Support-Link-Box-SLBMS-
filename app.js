@@ -1040,10 +1040,6 @@ export const supabase = createClient(supabaseUrl, supabaseKey)
                     <i data-lucide="user-plus" class="w-4 h-4"></i>
                     Add New Member
                   </button>
-                  <button id="clear-demo-btn" class="text-[10px] px-3.5 py-3 bg-rose-500/5 hover:bg-rose-500/15 text-rose-400 border border-rose-500/20 rounded-xl font-black uppercase tracking-wider flex items-center gap-1.5 transition duration-200 cursor-pointer">
-                    <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
-                    Reset & Clear Demo
-                  </button>
                 </div>
               </div>
             </div>
@@ -1917,22 +1913,22 @@ ${listText}
                     <!-- Stats grid -->
                     <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
                       <div class="bg-slate-900/60 border border-slate-800 p-3.5 rounded-xl text-center space-y-1">
-                        <i data-lucide="award" class="w-5 h-5 mx-auto text-yellow-400"></i>
+                        <div class="text-xl leading-none mb-1">🏆</div>
                         <p class="text-[9px] text-slate-500 uppercase font-bold">Total Points</p>
                         <p class="text-base font-black text-slate-200 font-mono">${selectedMember.total_points} Pts</p>
                       </div>
                       <div class="bg-slate-900/60 border border-slate-800 p-3.5 rounded-xl text-center space-y-1">
-                        <i data-lucide="flame" class="w-5 h-5 mx-auto text-rose-500 animate-pulse"></i>
+                        <div class="text-xl leading-none mb-1 animate-pulse">🔥</div>
                         <p class="text-[9px] text-slate-500 uppercase font-bold">Current Streak</p>
                         <p class="text-base font-black text-rose-400 font-mono">${selectedMember.current_streak} Days</p>
                       </div>
                       <div class="bg-slate-900/60 border border-slate-800 p-3.5 rounded-xl text-center space-y-1">
-                        <i data-lucide="sparkles" class="w-5 h-5 mx-auto text-indigo-400"></i>
+                        <div class="text-xl leading-none mb-1">✨</div>
                         <p class="text-[9px] text-slate-500 uppercase font-bold">Longest Streak</p>
                         <p class="text-base font-black text-indigo-400 font-mono">${selectedMember.longest_streak} Days</p>
                       </div>
                       <div class="bg-slate-900/60 border border-slate-800 p-3.5 rounded-xl text-center space-y-1">
-                        <i data-lucide="shield" class="w-5 h-5 mx-auto text-emerald-400"></i>
+                        <div class="text-xl leading-none mb-1">⭐</div>
                         <p class="text-[9px] text-slate-500 uppercase font-bold">Group Level</p>
                         <p class="text-base font-black text-emerald-400 font-mono">${selectedMember.level}</p>
                       </div>
@@ -1943,6 +1939,10 @@ ${listText}
                       <div class="space-y-2">
                         <p class="text-xs font-bold text-slate-400 uppercase tracking-wide">Activity Diagnostics</p>
                         <ul class="text-xs space-y-2">
+                          <li class="flex justify-between border-b border-slate-800/50 pb-1.5">
+                            <span class="text-slate-500">Group Name:</span>
+                            <span class="text-indigo-400 font-extrabold tracking-wide">Support Link Box</span>
+                          </li>
                           <li class="flex justify-between border-b border-slate-800/50 pb-1.5">
                             <span class="text-slate-500">Status:</span>
                             <span class="font-bold capitalize ${selectedMember.status === 'active' ? 'text-emerald-400' : 'text-rose-400'}">● ${selectedMember.status}</span>
@@ -1963,8 +1963,8 @@ ${listText}
                       </div>
 
                       <div class="bg-slate-900/40 border border-slate-800 p-4 rounded-xl flex flex-col justify-between">
-                        <p class="text-xs font-bold text-slate-400 uppercase tracking-wide mb-2 flex items-center gap-1">
-                          <i data-lucide="award" class="w-4 h-4 text-yellow-500"></i> Earned Badges (${allBadges.length})
+                        <p class="text-xs font-bold text-slate-400 uppercase tracking-wide mb-2 flex items-center gap-1.5">
+                          <span>🏅</span> Earned Badges (${allBadges.length})
                         </p>
                         ${allBadges.length > 0 ? `
                           <div class="flex flex-wrap gap-2 overflow-y-auto max-h-24">
@@ -3032,16 +3032,22 @@ function bindEvents() {
       };
     });
 
-    // Unified PNG downloader triggers (CORS/IFrame proof & allowTaint)
+    // Unified PNG downloader triggers (CORS/IFrame proof & clone solution)
     const triggerPngDownload = () => {
-      const reportCard = document.getElementById('printable-report-card');
       const selectedMember = state.members.find(m => m.id === state.reportSelectedMemberId);
-      if (!reportCard || !selectedMember) return;
+      if (!selectedMember) return;
 
       updateState({ isDownloadingReport: true });
       showToast('ইমেজ তৈরি হচ্ছে...', 'info');
 
       setTimeout(() => {
+        const reportCard = document.getElementById('printable-report-card');
+        if (!reportCard) {
+          showToast('ডাউনলোড ব্যর্থ: কার্ড এলিমেন্ট খুঁজে পাওয়া যায়নি।', 'error');
+          updateState({ isDownloadingReport: false });
+          return;
+        }
+
         const html2canvasFn = window.html2canvas || (typeof html2canvas !== 'undefined' ? html2canvas : null);
         if (!html2canvasFn) {
           showToast('ডাউনলোড ব্যর্থ: html2canvas লাইব্রেরি লোড হয়নি। দয়া করে পেজটি রিলোড দিন।', 'error');
@@ -3051,32 +3057,73 @@ function bindEvents() {
 
         const filename = `${selectedMember.name.replace(/\s+/g, '_')}_Performance_Card.png`;
 
-        html2canvasFn(reportCard, {
-          scale: 3,
+        // Clone the card to bypass iframe/transform scroll locator issues in html2canvas
+        const clone = reportCard.cloneNode(true);
+        const origRect = reportCard.getBoundingClientRect();
+        
+        // Setup direct absolute body placement offscreen so it's fully visible to the cloner
+        clone.style.position = 'fixed';
+        clone.style.top = '0px';
+        clone.style.left = '-9999px';
+        clone.style.width = (origRect.width || 720) + 'px';
+        clone.style.height = 'auto';
+        clone.style.zIndex = '-9999';
+        clone.style.margin = '0';
+        clone.style.boxSizing = 'border-box';
+        
+        document.body.appendChild(clone);
+
+        const options = {
+          scale: 2,
           useCORS: true,
-          backgroundColor: null,
-          logging: false
-        }).then(canvas => {
-          const imgData = canvas.toDataURL('image/png');
-          
-          const a = document.createElement('a');
-          a.href = imgData;
-          a.download = filename;
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
+          allowTaint: true,
+          backgroundColor: '#020617', // Match Slate 950
+          logging: false,
+          scrollX: 0,
+          scrollY: 0
+        };
 
-          showToast(`"${filename}" ডাউনলোড হচ্ছে!`, 'success');
+        html2canvasFn(clone, options).then(canvas => {
+          document.body.removeChild(clone);
+          try {
+            const imgData = canvas.toDataURL('image/png');
+            
+            const a = document.createElement('a');
+            a.href = imgData;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
 
-          // Open state modal with the image URL for mobile users or cross-origin fallbacks
-          updateState({ 
-            isDownloadingReport: false,
-            generatedPngUrl: imgData,
-            generatedPngMemberName: selectedMember.name
-          });
+            showToast(`"${filename}" ডাউনলোড হচ্ছে!`, 'success');
+
+            updateState({ 
+              isDownloadingReport: false,
+              generatedPngUrl: imgData,
+              generatedPngMemberName: selectedMember.name
+            });
+          } catch (urlErr) {
+            console.warn('Direct save link failed, displaying image fallback popup:', urlErr);
+            showToast('ছবি তৈরি হয়েছে! ব্রাউজারের সুরক্ষার কারণে সরাসরি ডাউনলোড না হলে নিচের ছবিটিতে চেপে ধরে রাখুন।', 'info');
+            
+            try {
+              const imgData = canvas.toDataURL('image/png');
+              updateState({ 
+                isDownloadingReport: false,
+                generatedPngUrl: imgData,
+                generatedPngMemberName: selectedMember.name
+              });
+            } catch (err) {
+              updateState({ isDownloadingReport: false });
+            }
+          }
         }).catch(err => {
-          console.error('Canvas image generation failed:', err);
-          showToast('ইমেজ সেভ করতে সমস্যা হয়েছে।', 'error');
+          if (clone && clone.parentNode) {
+            document.body.removeChild(clone);
+          }
+          console.error('Canvas generation failed:', err);
+          const errorMsg = err && err.message ? err.message : String(err);
+          showToast(`ইমেজ সেভ করতে সমস্যা হয়েছে। Error: ${errorMsg}`, 'error');
           updateState({ isDownloadingReport: false });
         });
       }, 400);
