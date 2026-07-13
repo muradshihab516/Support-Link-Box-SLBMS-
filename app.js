@@ -2545,6 +2545,15 @@ Generated on: ${new Date().toLocaleString()}
         const onResolve = state.duplicateResolutionModal.onResolve;
         const duplicates = state.duplicateResolutionModal.duplicates;
         
+        // 1. Read current names from all active text fields in DOM
+        document.querySelectorAll('.rename-occ-input').forEach(inp => {
+          const dIdx = parseInt(inp.getAttribute('data-dup-idx'), 10);
+          const oIdx = parseInt(inp.getAttribute('data-occ-idx'), 10);
+          if (duplicates[dIdx] && duplicates[dIdx].occurrences[oIdx]) {
+            duplicates[dIdx].occurrences[oIdx].resolvedName = inp.value.trim();
+          }
+        });
+
         const allResolvedNames = [];
         let hasValidationError = false;
         let validationMsg = '';
@@ -2560,13 +2569,6 @@ Generated on: ${new Date().toLocaleString()}
               if (allResolvedNames.includes(nameClean.toLowerCase())) {
                 hasValidationError = true;
                 validationMsg = `"${nameClean}" নামটি একাধিকবার ব্যবহার করা হয়েছে। প্রতিটি মেম্বার এর নাম ইউনিক হতে হবে!`;
-              }
-              const isOrigRegistered = occ.isRegistered || false;
-              const isKeepingOrigName = (occ.originalName.toLowerCase() === nameClean.toLowerCase());
-              const existingInDb = state.members.some(m => m.name.toLowerCase() === nameClean.toLowerCase());
-              if (existingInDb && !(isOrigRegistered && isKeepingOrigName)) {
-                hasValidationError = true;
-                validationMsg = `"${nameClean}" নামের মেম্বার ইতিমধ্যে ডাটাবেজে রেজিস্টার আছে! অনুগ্রহ করে ইউনিক নাম দিন।`;
               }
               allResolvedNames.push(nameClean.toLowerCase());
             }
@@ -2594,29 +2596,6 @@ Generated on: ${new Date().toLocaleString()}
       };
     }
 
-    // Input changes
-    document.querySelectorAll('.rename-occ-input').forEach(inp => {
-      inp.oninput = (e) => {
-        const dupIdx = parseInt(e.target.getAttribute('data-dup-idx'), 10);
-        const occIdx = parseInt(e.target.getAttribute('data-occ-idx'), 10);
-        const value = e.target.value;
-        
-        const nextDuplicates = [...state.duplicateResolutionModal.duplicates];
-        nextDuplicates[dupIdx].occurrences[occIdx].resolvedName = value;
-        updateState({
-          duplicateResolutionModal: {
-            ...state.duplicateResolutionModal,
-            duplicates: nextDuplicates
-          }
-        });
-        const refreshedInput = document.querySelector(`.rename-occ-input[data-dup-idx="${dupIdx}"][data-occ-idx="${occIdx}"]`);
-        if (refreshedInput) {
-          refreshedInput.focus();
-          refreshedInput.setSelectionRange(value.length, value.length);
-        }
-      };
-    });
-
     // Skip / Undo toggle
     document.querySelectorAll('.toggle-skip-btn').forEach(btn => {
       btn.onclick = (e) => {
@@ -2624,6 +2603,16 @@ Generated on: ${new Date().toLocaleString()}
         const occIdx = parseInt(e.currentTarget.getAttribute('data-occ-idx'), 10);
         
         const nextDuplicates = [...state.duplicateResolutionModal.duplicates];
+        
+        // Capture typed text from the DOM inputs first, so they aren't lost on re-render
+        document.querySelectorAll('.rename-occ-input').forEach(inp => {
+          const dIdx = parseInt(inp.getAttribute('data-dup-idx'), 10);
+          const oIdx = parseInt(inp.getAttribute('data-occ-idx'), 10);
+          if (nextDuplicates[dIdx] && nextDuplicates[dIdx].occurrences[oIdx]) {
+            nextDuplicates[dIdx].occurrences[oIdx].resolvedName = inp.value.trim();
+          }
+        });
+
         nextDuplicates[dupIdx].occurrences[occIdx].skipped = !nextDuplicates[dupIdx].occurrences[occIdx].skipped;
         updateState({
           duplicateResolutionModal: {
@@ -3121,6 +3110,7 @@ Generated on: ${new Date().toLocaleString()}
                   });
                 });
 
+                const originalRawText = state.bulkInputText;
                 updateState({
                   bulkInputText: nextText,
                   members: getMembers(),
@@ -3128,7 +3118,7 @@ Generated on: ${new Date().toLocaleString()}
                 });
 
                 // 3. Open Pending Submission Preview Flow instead of saving directly
-                openSubmissionPreviewFlow(state.bulkInputText, nextText, resolvedDuplicates);
+                openSubmissionPreviewFlow(originalRawText, nextText, resolvedDuplicates);
               }
             }
           });
