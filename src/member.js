@@ -153,7 +153,7 @@ export function parseBulkActivityText(text) {
 
   const parsedNames = [];
   // Strict regex parser separated into clean isolated algorithm to protect Messenger shifts
-  const regex = /@([^\n\r0-9📅📆✅👇🅾️➤〰️💤⚠️\r\n\t(@]+)/g;
+  const regex = /@([^\n\r📅📆✅👇🅾️➤〰️💤⚠️\r\n\t(@]+)/g;
   let match;
   while ((match = regex.exec(text)) !== null) {
     const extracted = match[1].trim();
@@ -170,7 +170,7 @@ export function parseBulkActivityText(text) {
     const parts = text.split('@');
     for (let i = 1; i < parts.length; i++) {
       const part = parts[i];
-      const namePartMatch = part.match(/^([^0-9📅📆✅👇🅾️➤〰️💤⚠️\r\n\t(@]+)/);
+      const namePartMatch = part.match(/^([^📅📆✅👇🅾️➤〰️💤⚠️\r\n\t(@]+)/);
       if (namePartMatch) {
         const cleaned = namePartMatch[1].trim();
         if (cleaned && cleaned.length > 1 && !parsedNames.includes(cleaned)) {
@@ -213,7 +213,7 @@ export function analyzeUnregisteredDuplicates(text) {
   
   // 1. Extract ALL parsed raw names (preserving duplicates)
   const allParsedNames = [];
-  const regex = /@([^\n\r0-9📅📆✅👇🅾️➤〰️💤⚠️\r\n\t(@]+)/g;
+  const regex = /@([^\n\r📅📆✅👇🅾️➤〰️💤⚠️\r\n\t(@]+)/g;
   let match;
   while ((match = regex.exec(text)) !== null) {
     const extracted = match[1].trim();
@@ -230,7 +230,7 @@ export function analyzeUnregisteredDuplicates(text) {
     const parts = text.split('@');
     for (let i = 1; i < parts.length; i++) {
       const part = parts[i];
-      const namePartMatch = part.match(/^([^0-9📅📆✅👇🅾️➤〰️💤⚠️\r\n\t(@]+)/);
+      const namePartMatch = part.match(/^([^📅📆✅👇🅾️➤〰️💤⚠️\r\n\t(@]+)/);
       if (namePartMatch) {
         const cleaned = namePartMatch[1].trim();
         const cleanedFinal = cleanName(cleaned);
@@ -285,7 +285,7 @@ export function analyzeAllDuplicates(text) {
   
   // 1. Extract ALL parsed raw names (preserving duplicates)
   const allParsedNames = [];
-  const regex = /@([^\n\r0-9📅📆✅👇🅾️➤〰️💤⚠️\r\n\t(@]+)/g;
+  const regex = /@([^\n\r📅📆✅👇🅾️➤〰️💤⚠️\r\n\t(@]+)/g;
   let match;
   while ((match = regex.exec(text)) !== null) {
     const extracted = match[1].trim();
@@ -302,7 +302,7 @@ export function analyzeAllDuplicates(text) {
     const parts = text.split('@');
     for (let i = 1; i < parts.length; i++) {
       const part = parts[i];
-      const namePartMatch = part.match(/^([^0-9📅📆✅👇🅾️➤〰️💤⚠️\r\n\t(@]+)/);
+      const namePartMatch = part.match(/^([^📅📆✅👇🅾️➤〰️💤⚠️\r\n\t(@]+)/);
       if (namePartMatch) {
         const cleaned = namePartMatch[1].trim();
         const cleanedFinal = cleanName(cleaned);

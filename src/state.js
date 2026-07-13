@@ -44,7 +44,10 @@ let state = {
   developerUnlocked: typeof sessionStorage !== 'undefined' && sessionStorage.getItem('developer_unlocked') === 'true',
   selectedFreezeMemberIds: [],
   toast: null,
-  confirmModal: null
+  confirmModal: null,
+  duplicateResolutionModal: null,
+  unregisteredResolutionModal: null,
+  submissionPreviewModal: null
 };
 
 const listeners = new Set();

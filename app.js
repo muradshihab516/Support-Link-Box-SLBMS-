@@ -606,6 +606,63 @@ function render() {
     </div>
     ` : ''}
 
+    ${state.unregisteredResolutionModal ? `
+    <!-- Custom beautiful unregistered names resolution modal -->
+    <div id="unregistered-resolution-modal" class="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-[100] flex items-center justify-center p-4">
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl relative space-y-4 animate-scale-in max-h-[90vh] overflow-y-auto">
+        <div class="flex items-center gap-3 text-amber-500 border-b border-slate-800 pb-3">
+          <div class="p-2 bg-amber-500/10 rounded-xl border border-amber-500/25">
+            <i data-lucide="user-plus" class="w-6 h-6 animate-pulse"></i>
+          </div>
+          <div>
+            <h3 class="font-extrabold text-slate-100 text-sm tracking-wide uppercase">⚠️ Unregistered / New Member Detected</h3>
+            <p class="text-[10px] text-slate-400 font-semibold leading-relaxed mt-0.5">নিচের মেম্বারদের নাম ডাটাবেজে পাওয়া যায়নি।</p>
+          </div>
+        </div>
+        <p class="text-[11px] text-slate-300 font-medium leading-relaxed bg-amber-950/20 p-3 rounded-xl border border-amber-500/10">
+          অনুগ্রহ করে সিদ্ধান্ত নিন— <strong>Register</strong> (নতুন মেম্বার হিসেবে অ্যাড করুন), <strong>Rename</strong> (বানান ভুল থাকলে সঠিক নাম দিন) অথবা <strong>Skip / Ignore</strong> করুন।
+        </p>
+
+        <div class="space-y-4 divide-y divide-slate-800/60 max-h-[40vh] overflow-y-auto pr-1">
+          ${state.unregisteredResolutionModal.unregisteredNames.map((item, idx) => `
+            <div class="pt-3 space-y-3">
+              <div class="flex items-center justify-between">
+                <span class="text-xs font-bold text-amber-400 font-mono">@${item.originalName}</span>
+              </div>
+              
+              <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-950/50 p-3 rounded-xl border border-slate-800/40">
+                <div class="flex items-center gap-2">
+                  <select class="unreg-action-select bg-slate-900 border border-slate-800 text-[10px] px-2 py-1 rounded-lg text-slate-300 font-bold focus:outline-none focus:border-indigo-500 cursor-pointer" data-unreg-idx="${idx}">
+                    <option value="register" ${item.action === 'register' ? 'selected' : ''}>Register</option>
+                    <option value="rename" ${item.action === 'rename' ? 'selected' : ''}>Rename</option>
+                    <option value="skip" ${item.action === 'skip' ? 'selected' : ''}>Skip / Ignore</option>
+                  </select>
+                </div>
+                
+                <div class="flex items-center gap-2 flex-grow sm:justify-end">
+                  ${item.action === 'skip' ? `
+                    <span class="text-[10px] text-rose-400 font-bold bg-rose-500/10 px-2.5 py-1 rounded">Ignored</span>
+                  ` : `
+                    <input type="text" value="${item.resolvedName}" class="unreg-resolved-input bg-slate-900 border border-slate-800 text-xs px-2.5 py-1.5 rounded-lg text-slate-200 font-semibold focus:outline-none focus:border-indigo-500 w-full max-w-[180px]" data-unreg-idx="${idx}" ${item.action === 'register' ? 'readonly disabled opacity-60' : ''} />
+                  `}
+                </div>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+
+        <div class="flex justify-end gap-3 pt-3 border-t border-slate-800">
+          <button id="unreg-resolve-cancel-btn" class="bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-[10px] px-4 py-2.5 rounded-xl transition cursor-pointer">
+            বাতিল
+          </button>
+          <button id="unreg-resolve-save-btn" class="bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-[10px] px-5 py-2.5 rounded-xl shadow-lg transition cursor-pointer">
+            সংরক্ষণ করুন
+          </button>
+        </div>
+      </div>
+    </div>
+    ` : ''}
+
     ${state.submissionPreviewModal ? `
     <!-- Custom beautiful Pending Submission Preview Modal -->
     <div id="submission-preview-modal" class="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-[100] flex items-center justify-center p-4">
@@ -1408,9 +1465,9 @@ export const supabase = createClient(supabaseUrl, supabaseKey)
 
             <textarea id="bulk-activity-textarea" rows="12" placeholder="1. @Rahi Ahmed Rabiul&#10;2. @Orithra Mazumder&#10;3. @Ahmed Sopon" class="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 text-xs text-slate-300 placeholder-slate-700 focus:outline-none focus:border-indigo-500 font-mono leading-relaxed resize-y">${state.bulkInputText}</textarea>
 
-            <button id="save-activity-btn" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xs py-3.5 rounded-xl shadow-[0_4px_12px_rgba(79,70,229,0.3)] transition-all flex items-center justify-center gap-2 cursor-pointer" ${matchedMembers.length === 0 ? 'disabled' : ''}>
+            <button id="save-activity-btn" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xs py-3.5 rounded-xl shadow-[0_4px_12px_rgba(79,70,229,0.3)] transition-all flex items-center justify-center gap-2 cursor-pointer" ${parsedNames.length === 0 ? 'disabled' : ''}>
               <i data-lucide="save" class="w-4 h-4"></i>
-              Save Daily Activity (${matchedMembers.length} Active Members)
+              Save Daily Activity (${parsedNames.length} Mentions Found)
             </button>
 
             ${state.lastSubmissionSnapshot ? (() => {
@@ -2307,135 +2364,267 @@ ${listText}
   }
 }
 
-// Helper to analyze and open duplicate resolution modal
-function triggerDuplicateResolution(text, isAutoTrigger = false) {
-  const duplicates = analyzeAllDuplicates(text);
-  if (duplicates.length === 0) {
-    if (!isAutoTrigger) {
-      openSubmissionPreviewFlow(text, null, []);
-    }
+// Helper to analyze and open unregistered member resolution modal
+function triggerUnregisteredResolution(text, onComplete) {
+  const { unregisteredNames } = parseBulkActivityText(text);
+  if (unregisteredNames.length === 0) {
+    onComplete(text, []);
     return false;
   }
 
-  const mListLocal = getMembers();
-  const modalDuplicates = duplicates.map(d => {
-    const occurrences = [];
-    const isRegistered = mListLocal.some(m => getNormalizedName(m.name) === getNormalizedName(d.name));
-    
-    for (let i = 0; i < d.count; i++) {
-      occurrences.push({
-        id: i,
-        originalName: d.name,
-        resolvedName: isRegistered 
-          ? (i === 0 ? d.name : `${d.name} ${i + 1}`) 
-          : `${d.name} ${i + 1}`,
-        skipped: false,
-        isRegistered: isRegistered && i === 0
-      });
-    }
-    return {
-      name: d.name,
-      count: d.count,
-      occurrences,
-      isRegistered: isRegistered
-    };
-  });
+  const modalNames = unregisteredNames.map(name => ({
+    originalName: name,
+    action: 'register', // default action: register as a new member
+    resolvedName: name
+  }));
 
   updateState({
-    duplicateResolutionModal: {
-      duplicates: modalDuplicates,
-      onResolve: (resolvedDuplicates) => {
-        const escapeRegExp = (string) => {
-          return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        };
-
-        // 1. Bulk register new members for non-skipped renamed occurrences!
+    unregisteredResolutionModal: {
+      unregisteredNames: modalNames,
+      onResolve: (resolvedNames) => {
         const mList = getMembers();
         const auditTrails = getAuditTrails();
         const adminName = ADMIN_NAMES[state.currentAdminEmail] || 'Unknown Admin';
         let maxMemberNum = mList.reduce((max, m) => m.member_number > max ? m.member_number : max, 0);
 
-        resolvedDuplicates.forEach(dup => {
-          dup.occurrences.forEach(occ => {
-            if (!occ.skipped) {
-              const cleaned = cleanName(occ.resolvedName);
-              const isAlreadyInDb = mList.some(m => getNormalizedName(m.name) === getNormalizedName(cleaned));
-              
-              if (!isAlreadyInDb) {
-                maxMemberNum++;
-                mList.push({
-                  id: generateUUID(),
-                  name: cleaned,
-                  display_name: `@${cleaned.replace(/\s+/g, '')}`,
-                  member_number: maxMemberNum,
-                  status: 'active',
-                  level: CONFIG.LEVELS.BRONZE,
-                  total_points: 0,
-                  current_streak: 0,
-                  longest_streak: 0,
-                  total_active_days: 0,
-                  last_active_date: null,
-                  consecutive_inactive_days: 0,
-                  notes: '',
-                  created_at: new Date().toISOString(),
-                  updated_at: new Date().toISOString()
-                });
+        resolvedNames.forEach(item => {
+          const cleaned = cleanName(item.resolvedName);
+          if (item.action === 'register' || item.action === 'rename') {
+            const isAlreadyInDb = mList.some(m => getNormalizedName(m.name) === getNormalizedName(cleaned));
+            if (!isAlreadyInDb) {
+              maxMemberNum++;
+              mList.push({
+                id: generateUUID(),
+                name: cleaned,
+                display_name: `@${cleaned.replace(/\s+/g, '')}`,
+                member_number: maxMemberNum,
+                status: 'active',
+                level: CONFIG.LEVELS.BRONZE,
+                total_points: 0,
+                current_streak: 0,
+                longest_streak: 0,
+                total_active_days: 0,
+                last_active_date: null,
+                consecutive_inactive_days: 0,
+                notes: '',
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+              });
 
-                auditTrails.unshift({
-                  id: `audit-${generateUUID()}`,
-                  admin_email: state.currentAdminEmail,
-                  admin_name: adminName,
-                  action: 'ADD_MEMBER',
-                  entity_type: 'MEMBER',
-                  description: `Registered resolved duplicate member: ${cleaned} (No. ${maxMemberNum})`,
-                  timestamp: new Date().toISOString()
-                });
-              }
+              auditTrails.unshift({
+                id: `audit-${generateUUID()}`,
+                admin_email: state.currentAdminEmail,
+                admin_name: adminName,
+                action: 'ADD_MEMBER',
+                entity_type: 'MEMBER',
+                description: `Registered resolved unregistered member: ${cleaned} (No. ${maxMemberNum})`,
+                timestamp: new Date().toISOString()
+              });
             }
-          });
+          }
         });
 
         saveMembers(mList);
         saveAuditTrails(auditTrails);
 
-        showToast('ডুপ্লিকেট মেম্বার সমাধান করা হয়েছে এবং রিনেম করা মেম্বারদের রেজিস্টার করা হয়েছে!', 'success');
+        showToast('নতুন মেম্বারদের সফলভাবে রেজিস্টার করা হয়েছে!', 'success');
 
-        // 2. Map the occurrences in the daily submission activity list!
-        let nextText = text;
-        
-        resolvedDuplicates.forEach(dup => {
-          let occurrenceCounter = 0;
-          nextText = nextText.replace(new RegExp(`@${escapeRegExp(dup.name)}`, 'gi'), (match) => {
-            const occ = dup.occurrences[occurrenceCounter];
-            occurrenceCounter++;
-            if (!occ) return match;
-            if (occ.skipped) {
-              return ''; // skip/ignore
+        // Map mentions in the daily submission activity list
+        const mentionRegex = /@([^\n\r📅📆✅👇🅾️➤〰️💤⚠️\r\n\t(@]+)/g;
+        let nextText = text.replace(mentionRegex, (match, p1) => {
+          const extracted = p1.trim();
+          const cleaned = extracted.replace(/^[➤\s]+/, '').trim();
+          const cleanedFinal = cleanName(cleaned);
+          const norm = getNormalizedName(cleanedFinal);
+
+          const item = resolvedNames.find(rn => getNormalizedName(rn.originalName) === norm);
+          if (item) {
+            if (item.action === 'skip') {
+              return '';
             } else {
-              return `@${occ.resolvedName}`;
+              return `@${item.resolvedName}`;
             }
-          });
+          }
+          return match;
         });
 
         // Clean up empty lines from skipped entries
         nextText = nextText.split('\n')
+          .map(line => {
+            const cleanLine = line.replace(/[0-9📅📆✅👇🅾️➤〰️💤⚠️\s.\-()]/g, '');
+            if (cleanLine.length === 0) return '';
+            return line;
+          })
           .filter(line => line.trim().length > 0)
           .join('\n');
 
         updateState({
           bulkInputText: nextText,
           members: getMembers(),
-          duplicateResolutionModal: null
+          unregisteredResolutionModal: null
         });
 
-        if (!isAutoTrigger) {
-          openSubmissionPreviewFlow(text, nextText, resolvedDuplicates);
-        }
+        onComplete(nextText, resolvedNames);
       }
     }
   });
 
   return true;
+}
+
+// Unified pipeline for processing Daily Submission Workflow:
+// Paste/Submit -> Resolve Duplicates (if any) -> Resolve Unregistered (if any) -> Preview Modal
+function processDailySubmissionWorkflow(text, isAutoTrigger = false) {
+  const duplicates = analyzeAllDuplicates(text);
+  
+  if (duplicates.length > 0) {
+    const mListLocal = getMembers();
+    const modalDuplicates = duplicates.map(d => {
+      const occurrences = [];
+      const isRegistered = mListLocal.some(m => getNormalizedName(m.name) === getNormalizedName(d.name));
+      
+      for (let i = 0; i < d.count; i++) {
+        occurrences.push({
+          id: i,
+          originalName: d.name,
+          resolvedName: isRegistered 
+            ? (i === 0 ? d.name : `${d.name} ${i + 1}`) 
+            : `${d.name} ${i + 1}`,
+          skipped: false,
+          isRegistered: isRegistered && i === 0
+        });
+      }
+      return {
+        name: d.name,
+        count: d.count,
+        occurrences,
+        isRegistered: isRegistered
+      };
+    });
+
+    updateState({
+      duplicateResolutionModal: {
+        duplicates: modalDuplicates,
+        onResolve: (resolvedDuplicates) => {
+          // 1. Bulk register new members for non-skipped renamed occurrences!
+          const mList = getMembers();
+          const auditTrails = getAuditTrails();
+          const adminName = ADMIN_NAMES[state.currentAdminEmail] || 'Unknown Admin';
+          let maxMemberNum = mList.reduce((max, m) => m.member_number > max ? m.member_number : max, 0);
+
+          resolvedDuplicates.forEach(dup => {
+            dup.occurrences.forEach(occ => {
+              if (!occ.skipped) {
+                const cleaned = cleanName(occ.resolvedName);
+                const isAlreadyInDb = mList.some(m => getNormalizedName(m.name) === getNormalizedName(cleaned));
+                
+                if (!isAlreadyInDb) {
+                  maxMemberNum++;
+                  mList.push({
+                    id: generateUUID(),
+                    name: cleaned,
+                    display_name: `@${cleaned.replace(/\s+/g, '')}`,
+                    member_number: maxMemberNum,
+                    status: 'active',
+                    level: CONFIG.LEVELS.BRONZE,
+                    total_points: 0,
+                    current_streak: 0,
+                    longest_streak: 0,
+                    total_active_days: 0,
+                    last_active_date: null,
+                    consecutive_inactive_days: 0,
+                    notes: '',
+                    created_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString()
+                  });
+
+                  auditTrails.unshift({
+                    id: `audit-${generateUUID()}`,
+                    admin_email: state.currentAdminEmail,
+                    admin_name: adminName,
+                    action: 'ADD_MEMBER',
+                    entity_type: 'MEMBER',
+                    description: `Registered resolved duplicate member: ${cleaned} (No. ${maxMemberNum})`,
+                    timestamp: new Date().toISOString()
+                  });
+                }
+              }
+            });
+          });
+
+          saveMembers(mList);
+          saveAuditTrails(auditTrails);
+
+          showToast('ডুপ্লিকেট মেম্বার সমাধান করা হয়েছে এবং রিনেম করা মেম্বারদের রেজিস্টার করা হয়েছে!', 'success');
+
+          // 2. Map the occurrences in the daily submission activity list!
+          const occurrenceCounters = {};
+          const mentionRegex = /@([^\n\r📅📆✅👇🅾️➤〰️💤⚠️\r\n\t(@]+)/g;
+
+          let nextText = text.replace(mentionRegex, (match, p1) => {
+            const extracted = p1.trim();
+            const cleaned = extracted.replace(/^[➤\s]+/, '').trim();
+            const cleanedFinal = cleanName(cleaned);
+            const norm = getNormalizedName(cleanedFinal);
+
+            // Find if this name is in our duplicates
+            const dup = resolvedDuplicates.find(d => getNormalizedName(d.name) === norm);
+            if (dup) {
+              if (occurrenceCounters[norm] === undefined) {
+                occurrenceCounters[norm] = 0;
+              }
+              const occIdx = occurrenceCounters[norm];
+              occurrenceCounters[norm]++;
+
+              const occ = dup.occurrences[occIdx];
+              if (occ) {
+                if (occ.skipped) {
+                  return ''; // Completely skip/ignore this occurrence
+                } else {
+                  return `@${occ.resolvedName}`;
+                }
+              }
+            }
+            return match; // Return unchanged if not found or not a duplicate
+          });
+
+          // Clean up empty lines from skipped entries and bullet items
+          nextText = nextText.split('\n')
+            .map(line => {
+              const cleanLine = line.replace(/[0-9📅📆✅👇🅾️➤〰️💤⚠️\s.\-()]/g, '');
+              if (cleanLine.length === 0) return '';
+              return line;
+            })
+            .filter(line => line.trim().length > 0)
+            .join('\n');
+
+          updateState({
+            bulkInputText: nextText,
+            members: getMembers(),
+            duplicateResolutionModal: null
+          });
+
+          // Move to next step: Resolve Unregistered
+          triggerUnregisteredResolution(nextText, (finalText, resolvedUnreg) => {
+            openSubmissionPreviewFlow(text, finalText, resolvedDuplicates);
+          });
+        }
+      }
+    });
+    return true;
+  } else {
+    // No duplicates exist.
+    if (isAutoTrigger) {
+      // Just auto-triggered onpaste, no duplicates, so do nothing.
+      return false;
+    }
+
+    // Trigger unregistered member resolution
+    triggerUnregisteredResolution(text, (finalText, resolvedUnreg) => {
+      openSubmissionPreviewFlow(text, finalText, []);
+    });
+    return true;
+  }
 }
 
 // Helper to open Pending Submission Preview Flow
@@ -2749,6 +2938,99 @@ Generated on: ${new Date().toLocaleString()}
           duplicateResolutionModal: {
             ...state.duplicateResolutionModal,
             duplicates: nextDuplicates
+          }
+        });
+      };
+    });
+  }
+
+  // Unregistered resolution modal interactive events
+  if (state.unregisteredResolutionModal) {
+    // Save button
+    const unregSaveBtn = document.getElementById('unreg-resolve-save-btn');
+    if (unregSaveBtn) {
+      unregSaveBtn.onclick = () => {
+        const onResolve = state.unregisteredResolutionModal.onResolve;
+        const unregNames = state.unregisteredResolutionModal.unregisteredNames;
+        
+        // Read current names from all input text fields in DOM
+        document.querySelectorAll('.unreg-resolved-input').forEach(inp => {
+          const idx = parseInt(inp.getAttribute('data-unreg-idx'), 10);
+          if (unregNames[idx]) {
+            unregNames[idx].resolvedName = inp.value.trim();
+          }
+        });
+
+        // Validation
+        let hasValidationError = false;
+        let validationMsg = '';
+        const allResolvedNames = [];
+
+        for (let i = 0; i < unregNames.length; i++) {
+          const item = unregNames[i];
+          if (item.action !== 'skip') {
+            const nameClean = item.resolvedName.trim();
+            if (!nameClean) {
+              hasValidationError = true;
+              validationMsg = 'মেম্বার এর নাম ফাঁকা হতে পারে না!';
+              break;
+            }
+            if (allResolvedNames.includes(nameClean.toLowerCase())) {
+              hasValidationError = true;
+              validationMsg = `"${nameClean}" নামটি একাধিকবার ব্যবহার করা হয়েছে!`;
+              break;
+            }
+            allResolvedNames.push(nameClean.toLowerCase());
+          }
+        }
+
+        if (hasValidationError) {
+          showToast(validationMsg, 'error');
+          return;
+        }
+
+        updateState({ unregisteredResolutionModal: null });
+        if (onResolve) {
+          onResolve(unregNames);
+        }
+      };
+    }
+
+    // Cancel button
+    const unregCancelBtn = document.getElementById('unreg-resolve-cancel-btn');
+    if (unregCancelBtn) {
+      unregCancelBtn.onclick = () => {
+        updateState({ unregisteredResolutionModal: null });
+        showToast('নতুন মেম্বার সমাধান বাতিল করা হয়েছে।', 'info');
+      };
+    }
+
+    // Action select change handler
+    document.querySelectorAll('.unreg-action-select').forEach(sel => {
+      sel.onchange = (e) => {
+        const idx = parseInt(e.target.getAttribute('data-unreg-idx'), 10);
+        const action = e.target.value;
+        
+        const nextUnreg = [...state.unregisteredResolutionModal.unregisteredNames];
+        
+        // Capture typed names from DOM first
+        document.querySelectorAll('.unreg-resolved-input').forEach(inp => {
+          const i = parseInt(inp.getAttribute('data-unreg-idx'), 10);
+          if (nextUnreg[i]) {
+            nextUnreg[i].resolvedName = inp.value.trim();
+          }
+        });
+
+        nextUnreg[idx].action = action;
+        if (action === 'register') {
+          // Reset to original name if register is chosen
+          nextUnreg[idx].resolvedName = nextUnreg[idx].originalName;
+        }
+
+        updateState({
+          unregisteredResolutionModal: {
+            ...state.unregisteredResolutionModal,
+            unregisteredNames: nextUnreg
           }
         });
       };
@@ -3124,7 +3406,7 @@ Generated on: ${new Date().toLocaleString()}
       textarea.onpaste = (e) => {
         setTimeout(() => {
           const text = textarea.value;
-          triggerDuplicateResolution(text, true);
+          processDailySubmissionWorkflow(text, true);
         }, 100);
       };
     }
@@ -3141,7 +3423,7 @@ Generated on: ${new Date().toLocaleString()}
     const saveBtn = document.getElementById('save-activity-btn');
     if (saveBtn) {
       saveBtn.onclick = () => {
-        triggerDuplicateResolution(state.bulkInputText, false);
+        processDailySubmissionWorkflow(state.bulkInputText, false);
       };
     }
 
