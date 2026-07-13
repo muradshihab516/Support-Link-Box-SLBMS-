@@ -16,7 +16,7 @@ import {
 } from './src/supabase.js';
 import { 
   handleAddMember, handleBulkAddMembers, parseBulkActivityText, submitBulkActivity,
-  analyzeUnregisteredDuplicates
+  analyzeUnregisteredDuplicates, analyzeAllDuplicates, calculateSubmissionStats
 } from './src/member.js';
 import { showToast } from './src/toast.js';
 import { showAlert, showConfirm } from './src/modal.js';
@@ -70,10 +70,27 @@ export function loadStateFromStorage() {
     saveMembers(cleanedMembers, true);
   }
   
+  const savedSnapshot = localStorage.getItem('support_linkbox_last_submission_snapshot');
+  let lastSubmissionSnapshot = null;
+  if (savedSnapshot) {
+    try {
+      const parsed = JSON.parse(savedSnapshot);
+      const elapsed = Date.now() - new Date(parsed.timestamp).getTime();
+      if (elapsed <= 5 * 60 * 1000) {
+        lastSubmissionSnapshot = parsed;
+      } else {
+        localStorage.removeItem('support_linkbox_last_submission_snapshot');
+      }
+    } catch (e) {
+      console.error('Failed to load snapshot:', e);
+    }
+  }
+
   updateState({
     members: cleanedMembers,
     auditTrails: getAuditTrails(),
-    currentAdminEmail: getCurrentAdmin()
+    currentAdminEmail: getCurrentAdmin(),
+    lastSubmissionSnapshot
   });
   
   const currentState = getState();
@@ -540,10 +557,10 @@ function render() {
       <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl relative space-y-4 animate-scale-in max-h-[90vh] overflow-y-auto">
         <div class="flex items-center gap-3 text-amber-500 border-b border-slate-800 pb-3">
           <i data-lucide="alert-triangle" class="w-6 h-6 animate-pulse"></i>
-          <h3 class="font-extrabold text-slate-100 text-sm tracking-wide uppercase">⚠️ Duplicate Member Name Detected</h3>
+          <h3 class="font-extrabold text-slate-100 text-sm tracking-wide uppercase">⚠️ Duplicate Name Found in Today's Submission</h3>
         </div>
-        <p class="text-[11px] text-slate-300 font-medium leading-relaxed">
-          নিচের নামগুলো একাধিকবার পাওয়া গেছে। অনুগ্রহ করে প্রতিটি Member-এর জন্য আলাদা নাম নির্ধারণ করুন অথবা প্রয়োজনে Skip করুন।
+        <p class="text-[11px] text-slate-300 font-semibold leading-relaxed">
+          নিচের Member-দের নাম একাধিকবার পাওয়া গেছে। অনুগ্রহ করে সিদ্ধান্ত নিন— Rename (যদি দুইজন ভিন্ন Member হয়) অথবা Skip Duplicate (যদি ভুলবশত একই Member দুইবার লেখা হয়ে থাকে)।
         </p>
 
         <div class="space-y-4 divide-y divide-slate-800/60 max-h-[50vh] overflow-y-auto pr-1">
@@ -556,7 +573,10 @@ function render() {
               <div class="space-y-2.5">
                 ${dup.occurrences.map((occ, occIdx) => `
                   <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-950/50 p-3 rounded-xl border border-slate-800/40">
-                    <span class="text-[10px] text-slate-400 font-mono">Occur ${occIdx + 1}</span>
+                    <div class="flex items-center gap-2">
+                      <span class="text-[10px] text-slate-400 font-mono">Occur ${occIdx + 1}</span>
+                      ${occ.isRegistered ? `<span class="text-[9px] text-emerald-400 font-bold bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">Registered Member</span>` : ''}
+                    </div>
                     
                     <div class="flex items-center gap-2 flex-grow sm:justify-end">
                       ${occ.skipped ? `
@@ -582,6 +602,156 @@ function render() {
             সংরক্ষণ করুন
           </button>
         </div>
+      </div>
+    </div>
+    ` : ''}
+
+    ${state.submissionPreviewModal ? `
+    <!-- Custom beautiful Pending Submission Preview Modal -->
+    <div id="submission-preview-modal" class="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-[100] flex items-center justify-center p-4">
+      <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-lg w-full p-6 sm:p-8 shadow-[0_24px_50px_rgba(0,0,0,0.8)] relative space-y-6 animate-scale-in max-h-[90vh] overflow-y-auto">
+        
+        <!-- Header -->
+        <div class="flex items-center gap-3 text-indigo-400 border-b border-slate-800 pb-4">
+          <div class="p-2 bg-indigo-500/10 rounded-xl border border-indigo-500/25">
+            <i data-lucide="clipboard-check" class="w-6 h-6"></i>
+          </div>
+          <div>
+            <h3 class="font-extrabold text-slate-100 text-sm tracking-wide uppercase">📋 Pending Submission Preview</h3>
+            <p class="text-[10px] text-slate-400 font-semibold leading-relaxed mt-0.5">সবকিছু যাচাই করে নিশ্চিত হোন। এরপর ডাটাবেজে সেভ হবে।</p>
+          </div>
+        </div>
+
+        <!-- Metrics Grid -->
+        <div class="grid grid-cols-2 gap-3.5">
+          <!-- Submission Date -->
+          <div class="bg-slate-950/50 border border-slate-800/60 p-3 rounded-2xl flex items-center gap-3">
+            <div class="p-2 bg-blue-500/10 text-blue-400 rounded-xl">
+              <i data-lucide="calendar" class="w-4 h-4"></i>
+            </div>
+            <div>
+              <p class="text-[9px] text-slate-500 font-bold uppercase tracking-wider">Submission Date</p>
+              <p class="text-xs font-black text-slate-200">${state.submissionPreviewModal.stats.submissionDate}</p>
+            </div>
+          </div>
+
+          <!-- Total Parsed -->
+          <div class="bg-slate-950/50 border border-slate-800/60 p-3 rounded-2xl flex items-center gap-3">
+            <div class="p-2 bg-indigo-500/10 text-indigo-400 rounded-xl">
+              <i data-lucide="users" class="w-4 h-4"></i>
+            </div>
+            <div>
+              <p class="text-[9px] text-slate-500 font-bold uppercase tracking-wider">মোট Parsed Member</p>
+              <p class="text-xs font-black text-indigo-400 font-mono">${state.submissionPreviewModal.stats.totalParsed} জন</p>
+            </div>
+          </div>
+
+          <!-- Registered Member -->
+          <div class="bg-slate-950/50 border border-slate-800/60 p-3 rounded-2xl flex items-center gap-3">
+            <div class="p-2 bg-emerald-500/10 text-emerald-400 rounded-xl">
+              <i data-lucide="check-circle" class="w-4 h-4"></i>
+            </div>
+            <div>
+              <p class="text-[9px] text-slate-500 font-bold uppercase tracking-wider">Registered Member</p>
+              <p class="text-xs font-black text-emerald-400 font-mono">${state.submissionPreviewModal.stats.registeredCount} জন</p>
+            </div>
+          </div>
+
+          <!-- New Member -->
+          <div class="bg-slate-950/50 border border-slate-800/60 p-3 rounded-2xl flex items-center gap-3">
+            <div class="p-2 bg-teal-500/10 text-teal-400 rounded-xl">
+              <i data-lucide="user-plus" class="w-4 h-4"></i>
+            </div>
+            <div>
+              <p class="text-[9px] text-slate-500 font-bold uppercase tracking-wider">New Member</p>
+              <p class="text-xs font-black text-teal-400 font-mono">${state.submissionPreviewModal.stats.newCount} জন</p>
+            </div>
+          </div>
+
+          <!-- Duplicate Name -->
+          <div class="bg-slate-950/50 border border-slate-800/60 p-3 rounded-2xl flex items-center gap-3">
+            <div class="p-2 bg-amber-500/10 text-amber-400 rounded-xl">
+              <i data-lucide="copy" class="w-4 h-4"></i>
+            </div>
+            <div>
+              <p class="text-[9px] text-slate-500 font-bold uppercase tracking-wider">Duplicate Name</p>
+              <p class="text-xs font-black text-amber-400 font-mono">${state.submissionPreviewModal.stats.duplicateCount} জন</p>
+            </div>
+          </div>
+
+          <!-- Skipped Member -->
+          <div class="bg-slate-950/50 border border-slate-800/60 p-3 rounded-2xl flex items-center gap-3">
+            <div class="p-2 bg-slate-500/10 text-slate-400 rounded-xl">
+              <i data-lucide="user-minus" class="w-4 h-4"></i>
+            </div>
+            <div>
+              <p class="text-[9px] text-slate-500 font-bold uppercase tracking-wider">Skipped Member</p>
+              <p class="text-xs font-black text-slate-400 font-mono">${state.submissionPreviewModal.stats.skippedCount} জন</p>
+            </div>
+          </div>
+
+          <!-- Frozen Member Found -->
+          <div class="bg-slate-950/50 border border-slate-800/60 p-3 rounded-2xl flex items-center gap-3">
+            <div class="p-2 bg-cyan-500/10 text-cyan-400 rounded-xl">
+              <i data-lucide="snowflake" class="w-4 h-4"></i>
+            </div>
+            <div>
+              <p class="text-[9px] text-slate-500 font-bold uppercase tracking-wider">Frozen Member Found</p>
+              <p class="text-xs font-black text-cyan-400 font-mono">${state.submissionPreviewModal.stats.frozenCount} / ${state.submissionPreviewModal.stats.totalParsed} জন</p>
+            </div>
+          </div>
+
+          <!-- Alias Match -->
+          <div class="bg-slate-950/50 border border-slate-800/60 p-3 rounded-2xl flex items-center gap-3">
+            <div class="p-2 bg-purple-500/10 text-purple-400 rounded-xl">
+              <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+            </div>
+            <div>
+              <p class="text-[9px] text-slate-500 font-bold uppercase tracking-wider">Alias Match</p>
+              <p class="text-xs font-black text-purple-400 font-mono">${state.submissionPreviewModal.stats.aliasCount} জন</p>
+            </div>
+          </div>
+
+          <!-- Invalid Name -->
+          <div class="bg-slate-950/50 border border-slate-800/60 p-3 rounded-2xl flex items-center gap-3">
+            <div class="p-2 bg-rose-500/10 text-rose-400 rounded-xl">
+              <i data-lucide="alert-octagon" class="w-4 h-4"></i>
+            </div>
+            <div>
+              <p class="text-[9px] text-slate-500 font-bold uppercase tracking-wider">Invalid Name</p>
+              <p class="text-xs font-black text-rose-400 font-mono">${state.submissionPreviewModal.stats.invalidCount} জন</p>
+            </div>
+          </div>
+
+          <!-- Total Activity Added -->
+          <div class="bg-slate-950/50 border border-indigo-500/30 p-3 rounded-2xl flex items-center gap-3 ring-1 ring-indigo-500/20">
+            <div class="p-2 bg-indigo-500/20 text-indigo-300 rounded-xl">
+              <i data-lucide="database" class="w-4 h-4"></i>
+            </div>
+            <div>
+              <p class="text-[9px] text-indigo-400 font-bold uppercase tracking-wider">Total Activity Added</p>
+              <p class="text-xs font-black text-indigo-300 font-mono">${state.submissionPreviewModal.stats.totalActivityAdded} জন</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Buttons -->
+        <div class="flex flex-col sm:flex-row justify-end gap-3 pt-4 border-t border-slate-800/60">
+          <button id="download-preview-btn" class="flex-grow sm:flex-none bg-slate-950 border border-slate-800 hover:border-indigo-500 hover:bg-slate-900 text-slate-300 hover:text-indigo-400 font-extrabold text-[10px] px-4 py-3 rounded-xl transition cursor-pointer flex items-center justify-center gap-1.5 order-2 sm:order-none">
+            <i data-lucide="download" class="w-3.5 h-3.5"></i>
+            Download Preview
+          </button>
+          
+          <button id="submission-preview-cancel-btn" class="flex-grow sm:flex-none bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-[10px] px-5 py-3 rounded-xl transition cursor-pointer order-3 sm:order-none">
+            Go Back & Edit
+          </button>
+          
+          <button id="submission-preview-submit-btn" class="flex-grow sm:flex-none bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-[10px] px-6 py-3 rounded-xl shadow-[0_4px_12px_rgba(79,70,229,0.3)] hover:shadow-[0_4px_20px_rgba(79,70,229,0.5)] transition cursor-pointer flex items-center justify-center gap-1.5 order-1 sm:order-none">
+            <i data-lucide="check" class="w-3.5 h-3.5"></i>
+            Confirm & Submit
+          </button>
+        </div>
+
       </div>
     </div>
     ` : ''}
@@ -1242,6 +1412,33 @@ export const supabase = createClient(supabaseUrl, supabaseKey)
               <i data-lucide="save" class="w-4 h-4"></i>
               Save Daily Activity (${matchedMembers.length} Active Members)
             </button>
+
+            ${state.lastSubmissionSnapshot ? (() => {
+              const elapsed = Date.now() - new Date(state.lastSubmissionSnapshot.timestamp).getTime();
+              const remaining = Math.max(0, 5 * 60 * 1000 - elapsed);
+              const mins = Math.floor(remaining / 60000);
+              const secs = Math.floor((remaining % 60000) / 1000);
+              const countdownText = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+              
+              return `
+                <div class="bg-rose-950/20 border border-rose-500/20 rounded-xl p-4 space-y-3 mt-4">
+                  <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                      <div class="w-2 h-2 rounded-full bg-rose-500 animate-pulse"></div>
+                      <span class="text-xs font-bold text-slate-100">Undo Last Submission Available</span>
+                    </div>
+                    <span id="undo-countdown" class="text-[10px] font-mono font-bold text-rose-400 bg-rose-500/10 px-2 py-0.5 rounded-full border border-rose-500/20">${countdownText}</span>
+                  </div>
+                  <p class="text-[10px] text-slate-400 leading-relaxed font-semibold">
+                    ${state.lastSubmissionSnapshot.submissionDate} তারিখের সাবমিশন করা হয়েছে। ৫ মিনিটের মধ্যে রোলব্যাক করা যাবে।
+                  </p>
+                  <button id="undo-last-submission-btn" class="w-full bg-rose-900/40 hover:bg-rose-900/60 text-rose-300 border border-rose-800 hover:border-rose-700 font-extrabold text-[10px] py-2.5 rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer">
+                    <i data-lucide="undo" class="w-3.5 h-3.5"></i>
+                    Undo Last Submission (Rollback)
+                  </button>
+                </div>
+              `;
+            })() : ''}
           </div>
 
           <!-- Right column: real-time parser diagnostic output -->
@@ -1350,11 +1547,12 @@ export const supabase = createClient(supabaseUrl, supabaseKey)
           ? warningMembers.map((m, idx) => `${idx + 1}️⃣➤ ${m.name} (${m.consecutive_inactive_days} দিন ইনেক্টিভ)`).join('\n')
           : '😴 বর্তমানে এই ফিল্টারে কোনো নিষ্ক্রিয় মেম্বার নেই!';
 
-        return `⚠️ গ্রুপ ওয়ার্নিং নোটিশ (Warning Notice) ⚠️
+        if (state.noticeType === 'alert') {
+          return `⚠️ গ্রুপ ওয়ার্নিং নোটিশ (Alert Warning) ⚠️
 
-আসসালামু আলাইকুম, আমাদের গ্রুপে যারা তিন বা তার বেশি দিন ধরে নিষ্ক্রিয় রয়েছেন এবং গ্রুপ লিংক সাপোর্ট দিচ্ছেন না, তাদের একটি চূড়ান্ত সতর্কবার্তা দেওয়া হচ্ছে।
+আসসালামু আলাইকুম। যারা দীর্ঘ দিন ধরে গ্রুপে নিষ্ক্রিয় (Inactive) রয়েছেন এবং গ্রুপ লিংক সাপোর্ট দিচ্ছেন না, তাদের একটি চূড়ান্ত সতর্কবার্তা দেওয়া হচ্ছে।
 
-অনুগ্রহ করে যত দ্রুত সম্ভব এক্টিভ হন অথবা কোনো সমস্যা থাকলে এডমিনের সাথে যোগাযোগ করুন। অন্যথায় আপনাদের গ্রুপ থেকে রিমুভ করা হবে।
+আগামী ২৪ ঘণ্টার মধ্যে গ্রুপে সচল বা এক্টিভ না হলে অথবা কোনো উপযুক্ত কারণ ছাড়া সাপোর্ট না দিলে, নিয়ম অনুযায়ী আপনাকে গ্রুপ থেকে রিমুভ (Kick) করা হবে। কোনো সমস্যা থাকলে দয়া করে দ্রুত এডমিনের সাথে যোগাযোগ করুন।
 
 😴 Inactive Members 👇
 〰〰〰〰〰〰〰〰〰〰
@@ -1364,36 +1562,104 @@ ${listText}
 📅 তারিখ: ${dateStr}
 
 ✍️ Support Link Box Admin Team`;
+        } else if (state.noticeType === 'kickout') {
+          return `🚫 গ্রুপ রিমুভ নোটিশ (Remove Notice) 🚫
+
+আসসালামু আলাইকুম। অত্যন্ত দুঃখের সাথে জানানো যাচ্ছে যে, দীর্ঘ দিন ধরে গ্রুপে সম্পূর্ণ নিষ্ক্রিয় (Inactive) থাকার কারণে এবং নিয়ম মেনে সাপোর্ট না দেওয়ায় নিচের মেম্বারদের গ্রুপ থেকে রিমুভ (Kick) করা হয়েছে।
+
+ভবিষ্যতে যদি আপনারা আবারো গ্রুপে যোগ দিতে চান, তবে দয়া করে এডমিন প্যানেলের সাথে যোগাযোগ করুন। পুনরায় গ্রুপে যোগদানের পর অবশ্যই নিয়মিত এক্টিভ থাকার অনুরোধ থাকবে।
+
+😴 Removed Members 👇
+〰〰〰〰〰〰〰〰〰〰
+
+${listText}
+〰〰〰〰〰〰〰〰〰〰
+📅 তারিখ: ${dateStr}
+
+✍️ Support Link Box Admin Team`;
+        } else {
+          // Default: simple warning
+          return `👋 গ্রুপ ওয়ার্নিং নোটিশ (Simple Warning) 👋
+
+আসসালামু আলাইকুম। আমাদের গ্রুপের সম্মানিত মেম্বারদের অবগতির জন্য জানানো যাচ্ছে যে, আপনারা অনেকেই কয়েকদিন ধরে গ্রুপে নিষ্ক্রিয় (Inactive) রয়েছেন এবং গ্রুপ লিংক সাপোর্ট দিচ্ছেন না।
+
+গ্রুপের প্রাণ হচ্ছে মেম্বারদের এক্টিভ অংশগ্রহণ। তাই আপনাদের সবাইকে গ্রুপে পুনরায় সচল ও এক্টিভ হওয়ার জন্য বিনীত অনুরোধ জানানো হচ্ছে। আসুন, সবাই একসাথে আমাদের গ্রুপকে আরও প্রাণবন্ত করে তুলি!
+
+😴 Inactive Members 👇
+〰〰〰〰〰〰〰〰〰〰
+
+${listText}
+〰〰〰〰〰〰〰〰〰〰
+📅 তারিখ: ${dateStr}
+
+✍️ Support Link Box Admin Team`;
+        }
       };
 
       return `
         <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
           
           <!-- Configuration Column -->
-          <div class="lg:col-span-4 bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-5">
+          <div class="lg:col-span-5 bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-5">
             <div class="flex items-center gap-2 border-b border-slate-800 pb-3">
               <i data-lucide="megaphone" class="w-5 h-5 text-indigo-400"></i>
               <h3 class="font-bold text-slate-100 text-lg">Notice Maker & Generator</h3>
             </div>
 
-            <p class="text-xs text-slate-400 leading-relaxed">
-              Select an inactivity threshold to generate warning notifications for inactive Facebook group members.
+            <p class="text-xs text-slate-400 leading-relaxed font-sans">
+              নিষ্ক্রিয় মেম্বারদের জন্য ৩টি ভিন্ন গুরুত্বের ওয়ার্নিং লেভেল সিলেক্ট করুন এবং কাস্টম ফিল্টার দিন ব্যবহার করে নোটিশ জেনারেট করুন।
             </p>
 
+            <!-- Notice Level Selector -->
+            <div class="space-y-3 pt-1">
+              <label class="block text-xs font-bold text-slate-300 uppercase tracking-wider font-sans">Notice Level (নোটিশ লেভেল)</label>
+              <div class="grid grid-cols-1 gap-2.5">
+                <label class="flex items-start gap-3 p-3 bg-slate-950/40 border ${state.noticeType === 'simple' ? 'border-indigo-500 bg-indigo-500/5' : 'border-slate-800'} rounded-xl hover:border-slate-700 transition cursor-pointer select-none">
+                  <input type="radio" name="notice-type-radio" value="simple" ${state.noticeType === 'simple' ? 'checked' : ''} class="mt-1 w-4 h-4 text-indigo-600 bg-slate-950 border-slate-800 focus:ring-indigo-500 cursor-pointer" />
+                  <div>
+                    <span class="block text-xs font-bold text-slate-200">Level 1 — Simple Warning</span>
+                    <span class="block text-[10px] text-slate-400 mt-0.5">এক্টিভ হওয়ার আহ্বান (বিনীত অনুরোধ)</span>
+                  </div>
+                </label>
+                <label class="flex items-start gap-3 p-3 bg-slate-950/40 border ${state.noticeType === 'alert' ? 'border-indigo-500 bg-indigo-500/5' : 'border-slate-800'} rounded-xl hover:border-slate-700 transition cursor-pointer select-none">
+                  <input type="radio" name="notice-type-radio" value="alert" ${state.noticeType === 'alert' ? 'checked' : ''} class="mt-1 w-4 h-4 text-indigo-600 bg-slate-950 border-slate-800 focus:ring-indigo-500 cursor-pointer" />
+                  <div>
+                    <span class="block text-xs font-bold text-slate-200">Level 2 — Alert Warning</span>
+                    <span class="block text-[10px] text-slate-400 mt-0.5">চূড়ান্ত সতর্কতা (নির্দিষ্ট সময়ে সচল হওয়ার তাগিদ)</span>
+                  </div>
+                </label>
+                <label class="flex items-start gap-3 p-3 bg-slate-950/40 border ${state.noticeType === 'kickout' ? 'border-indigo-500 bg-indigo-500/5' : 'border-slate-800'} rounded-xl hover:border-slate-700 transition cursor-pointer select-none">
+                  <input type="radio" name="notice-type-radio" value="kickout" ${state.noticeType === 'kickout' ? 'checked' : ''} class="mt-1 w-4 h-4 text-indigo-600 bg-slate-950 border-slate-800 focus:ring-indigo-500 cursor-pointer" />
+                  <div>
+                    <span class="block text-xs font-bold text-slate-200">Level 3 — Kickout Warning</span>
+                    <span class="block text-[10px] text-slate-400 mt-0.5">Remove Notice (গ্রুপ থেকে রিমুভ করা হয়েছে)</span>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            <!-- Filter Selection -->
             <div class="space-y-4 bg-slate-950 p-4 rounded-xl border border-slate-800">
               <div>
-                <label class="block text-xs font-semibold text-slate-400 mb-1.5 flex justify-between">
+                <label class="block text-xs font-semibold text-slate-400 mb-1.5 flex justify-between font-sans">
                   <span>Inactivity Threshold Filter</span>
                   <span class="text-indigo-400 font-bold">${state.noticeFilterDays} Days or more</span>
                 </label>
                 <select id="notice-filter-days" class="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-slate-200 cursor-pointer focus:outline-none focus:border-indigo-500">
-                  <option value="3" ${state.noticeFilterDays === 3 ? 'selected' : ''}>3+ Days Inactive</option>
-                  <option value="5" ${state.noticeFilterDays === 5 ? 'selected' : ''}>5+ Days Inactive</option>
-                  <option value="7" ${state.noticeFilterDays === 7 ? 'selected' : ''}>7+ Days Inactive</option>
-                  <option value="10" ${state.noticeFilterDays === 10 ? 'selected' : ''}>10+ Days Inactive</option>
-                  <option value="12" ${state.noticeFilterDays === 12 ? 'selected' : ''}>12+ Days Inactive</option>
+                  <option value="3" ${state.noticeFilterDays === 3 ? 'selected' : ''}>৩ দিন+ (3+ Days Inactive)</option>
+                  <option value="5" ${state.noticeFilterDays === 5 ? 'selected' : ''}>৫ দিন+ (5+ Days Inactive)</option>
+                  <option value="7" ${state.noticeFilterDays === 7 ? 'selected' : ''}>৭ দিন+ (7+ Days Inactive)</option>
+                  <option value="15" ${state.noticeFilterDays === 15 ? 'selected' : ''}>১৫ দিন+ (15+ Days Inactive)</option>
+                  <option value="custom" ${![3, 5, 7, 15].includes(state.noticeFilterDays) ? 'selected' : ''}>Custom Threshold (কাস্টম দিন)</option>
                 </select>
               </div>
+
+              ${![3, 5, 7, 15].includes(state.noticeFilterDays) ? `
+                <div class="pt-1.5 border-t border-slate-900">
+                  <label class="block text-[10px] font-bold text-slate-400 mb-1 uppercase tracking-wider font-sans">Enter Custom Inactive Days (কাস্টম দিন)</label>
+                  <input type="number" id="notice-custom-days" min="1" max="180" value="${state.noticeFilterDays}" class="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500" />
+                </div>
+              ` : ''}
             </div>
 
             <button id="copy-notice-btn" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs py-3.5 rounded-xl shadow-[0_4px_12px_rgba(79,70,229,0.3)] transition-all flex items-center justify-center gap-2 cursor-pointer">
@@ -1403,12 +1669,12 @@ ${listText}
           </div>
 
           <!-- Notice Content Box & Freeze Panel stacked -->
-          <div class="lg:col-span-8 space-y-6">
+          <div class="lg:col-span-7 space-y-6">
             <!-- Notice Output -->
             <div class="bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-4">
               <div class="flex justify-between items-center border-b border-slate-800 pb-3">
                 <span class="text-xs font-bold text-slate-400 flex items-center gap-1.5 uppercase tracking-wider font-sans">
-                  <i data-lucide="calendar" class="w-3.5 h-3.5 text-indigo-400"></i> Notice Output
+                  <i data-lucide="calendar" class="w-3.5 h-3.5 text-indigo-400"></i> Notice Output (${state.noticeType.toUpperCase()})
                 </span>
                 <span class="text-[10px] text-slate-500 font-bold font-mono uppercase">${warningMembers.length} Inactive Found</span>
               </div>
@@ -1438,6 +1704,17 @@ ${listText}
               <p class="text-xs text-slate-400 leading-relaxed font-sans">
                 আপনি যে মেম্বারদের ফেসবুক গ্রুপ থেকে রিমুভ (Kick) করেছেন, তাদের নামের পাশের বক্সে টিক দিন এবং নিচের <b>Freeze Selected</b> বাটনে ক্লিক করুন। ফ্রোজেন মেম্বাররা কোনো নোটিশ, লিডারবোর্ড বা ডিরেক্টরিতে আর অন্তর্ভুক্ত হবে না।
               </p>
+
+              ${warningMembers.length > 0 ? `
+                <div class="flex items-center gap-2.5 pb-1">
+                  <button id="freeze-select-all-btn" class="text-[10px] font-black uppercase tracking-wider px-3.5 py-2 bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-400 border border-indigo-500/20 rounded-xl flex items-center gap-1.5 transition cursor-pointer select-none">
+                    <i data-lucide="check-square" class="w-3.5 h-3.5"></i> Select All
+                  </button>
+                  <button id="freeze-unselect-all-btn" class="text-[10px] font-black uppercase tracking-wider px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-xl flex items-center gap-1.5 transition cursor-pointer select-none">
+                    <i data-lucide="square" class="w-3.5 h-3.5"></i> Unselect All
+                  </button>
+                </div>
+              ` : ''}
 
               <div class="max-h-[200px] overflow-y-auto space-y-2 pr-1 font-mono text-xs">
                 ${warningMembers.length > 0 ? warningMembers.map(m => {
@@ -2030,9 +2307,217 @@ ${listText}
   }
 }
 
+// Helper to open Pending Submission Preview Flow
+function openSubmissionPreviewFlow(rawText, resolvedText, resolvedDuplicates = []) {
+  const textToParse = resolvedText || rawText;
+  const stats = calculateSubmissionStats(rawText, resolvedText, resolvedDuplicates);
+
+  const onConfirm = () => {
+    updateState({ submissionPreviewModal: null });
+
+    const { matchedMembers } = parseBulkActivityText(textToParse);
+    if (matchedMembers.length === 0) return;
+
+    const frozenInList = matchedMembers.filter(m => m.status === 'frozen');
+
+    const proceedWithSubmission = () => {
+      if (frozenInList.length > 0) {
+        const checkAndProcessFrozen = (index, currentMatchedIds, toReactivateIds) => {
+          if (index >= frozenInList.length) {
+            if (toReactivateIds.length > 0) {
+              const members = getMembers();
+              toReactivateIds.forEach(id => {
+                const idx = members.findIndex(m => m.id === id);
+                if (idx !== -1) {
+                  members[idx].status = 'active';
+                  members[idx].consecutive_inactive_days = 0;
+                  members[idx].updated_at = new Date().toISOString();
+                }
+              });
+              saveMembers(members);
+              showToast(`${toReactivateIds.length} জন ফ্রোজেন মেম্বার পুনরায় একটিভ করা হয়েছে।`, 'success');
+            }
+
+            const finalActiveIds = currentMatchedIds.filter(id => {
+              const isFrozen = frozenInList.some(f => f.id === id);
+              if (isFrozen) {
+                return toReactivateIds.includes(id);
+              }
+              return true;
+            });
+
+            submitBulkActivity(state.bulkInputDate, finalActiveIds);
+            return;
+          }
+
+          const frozenMember = frozenInList[index];
+          showConfirm(
+            `Daily Submission List-এ ফ্রোজেন মেম্বার <b>${frozenMember.name}</b> (No. ${frozenMember.member_number}) সনাক্ত হয়েছে।<br><br>আপনি কি তাকে পুনরায় <b>Reactivate (সক্রিয়)</b> করতে চান নাকি <b>Ignore (উপেক্ষা)</b> করতে চান?`,
+            () => {
+              toReactivateIds.push(frozenMember.id);
+              checkAndProcessFrozen(index + 1, currentMatchedIds, toReactivateIds);
+            },
+            () => {
+              checkAndProcessFrozen(index + 1, currentMatchedIds, toReactivateIds);
+            },
+            'ফ্রিজড মেম্বার সনাক্ত হয়েছে',
+            'Reactivate Member',
+            'Ignore'
+          );
+        };
+
+        checkAndProcessFrozen(0, matchedMembers.map(m => m.id), []);
+      } else {
+        submitBulkActivity(state.bulkInputDate, matchedMembers.map(m => m.id));
+      }
+    };
+
+    proceedWithSubmission();
+  };
+
+  const onCancel = () => {
+    updateState({ submissionPreviewModal: null });
+  };
+
+  updateState({
+    submissionPreviewModal: {
+      stats,
+      textToParse,
+      onConfirm,
+      onCancel
+    }
+  });
+}
+
 // Interactive Event binding to the generated HTML elements
 function bindEvents() {
   
+  // Pending Submission Preview Modal buttons binding
+  const previewSubmitBtn = document.getElementById('submission-preview-submit-btn');
+  if (previewSubmitBtn && state.submissionPreviewModal) {
+    previewSubmitBtn.onclick = () => {
+      state.submissionPreviewModal.onConfirm();
+    };
+  }
+
+  const previewCancelBtn = document.getElementById('submission-preview-cancel-btn');
+  if (previewCancelBtn && state.submissionPreviewModal) {
+    previewCancelBtn.onclick = () => {
+      state.submissionPreviewModal.onCancel();
+    };
+  }
+
+  const previewDownloadBtn = document.getElementById('download-preview-btn');
+  if (previewDownloadBtn && state.submissionPreviewModal) {
+    previewDownloadBtn.onclick = () => {
+      const stats = state.submissionPreviewModal.stats;
+      const textToParse = state.submissionPreviewModal.textToParse;
+      const { matchedMembers } = parseBulkActivityText(textToParse);
+      
+      const fileContent = `========================================
+SUPPORT LINK BOX - DAILY SUBMISSION PREVIEW
+========================================
+📅 Submission Date: ${stats.submissionDate}
+👥 মোট Parsed Member: ${stats.totalParsed}
+✅ Registered Member: ${stats.registeredCount}
+🆕 New Member: ${stats.newCount}
+⚠️ Duplicate Name: ${stats.duplicateCount}
+⏭️ Skipped Member: ${stats.skippedCount}
+❄️ Frozen Member Found: ${stats.frozenCount}
+🔄 Alias Match: ${stats.aliasCount}
+❌ Invalid Name: ${stats.invalidCount}
+📝 Total Activity Added: ${stats.totalActivityAdded}
+========================================
+Active Members List:
+${matchedMembers.map((m, i) => `${i + 1}. ${m.name} (No. ${m.member_number})`).join('\n')}
+========================================
+Generated on: ${new Date().toLocaleString()}
+`;
+      const blob = new Blob([fileContent], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `linkbox-submission-preview-${stats.submissionDate}.txt`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      showToast('প্রিভিউ ফাইলটি ডাউনলোড করা হয়েছে!', 'success');
+    };
+  }
+
+  // Undo Last Submission button binding
+  const undoLastSubmissionBtn = document.getElementById('undo-last-submission-btn');
+  if (undoLastSubmissionBtn && state.lastSubmissionSnapshot) {
+    undoLastSubmissionBtn.onclick = () => {
+      const snapshot = state.lastSubmissionSnapshot;
+      showConfirm(
+        `আপনি কি নিশ্চিত?<br><br><b>${snapshot.submissionDate}</b> তারিখের Submission সম্পূর্ণভাবে <b>Rollback</b> হবে। এই পরিবর্তন আর ফেরত আনা যাবে না।`,
+        async () => {
+          // Perform rollback
+          saveMembers(snapshot.membersState);
+          saveActivityLogs(snapshot.logsState);
+          saveBadges(snapshot.badgesState);
+
+          // Delete added members / activity logs / badges on Supabase if enabled
+          const client = getSupabase();
+          if (state.supabaseSyncEnabled && client) {
+            try {
+              // Delete activity logs for that date
+              await client.from('activity_logs').delete().eq('activity_date', snapshot.submissionDate);
+              
+              // Find added member IDs
+              const prevMemberIds = new Set(snapshot.membersState.map(m => m.id));
+              const currentMembers = getMembers();
+              const addedMemberIds = currentMembers.filter(m => !prevMemberIds.has(m.id)).map(m => m.id);
+              if (addedMemberIds.length > 0) {
+                await client.from('members').delete().in('id', addedMemberIds);
+              }
+              
+              // Find added badge IDs
+              const prevBadgeIds = new Set(snapshot.badgesState.map(b => b.id));
+              const currentBadges = getBadges();
+              const addedBadgeIds = currentBadges.filter(b => !prevBadgeIds.has(b.id)).map(b => b.id);
+              if (addedBadgeIds.length > 0) {
+                await client.from('badges').delete().in('id', addedBadgeIds);
+              }
+            } catch (e) {
+              console.error('Supabase rollback failed:', e);
+            }
+          }
+
+          // Log rollback in Audit Log
+          const adminName = ADMIN_NAMES[state.currentAdminEmail] || 'Unknown Admin';
+          const auditTrails = getAuditTrails();
+          auditTrails.unshift({
+            id: `audit-${generateUUID()}`,
+            admin_email: state.currentAdminEmail,
+            admin_name: adminName,
+            action: 'ROLLBACK_SUBMISSION',
+            entity_type: 'ACTIVITY',
+            description: `${snapshot.submissionDate} তারিখের সাবমিশন সফলভাবে রোলব্যাক করেছেন।`,
+            timestamp: new Date().toISOString()
+          });
+          saveAuditTrails(auditTrails);
+
+          // Clear snapshot
+          localStorage.removeItem('support_linkbox_last_submission_snapshot');
+          updateState({
+            members: getMembers(),
+            auditTrails: getAuditTrails(),
+            lastSubmissionSnapshot: null
+          });
+
+          showToast('সাবমিশন সফলভাবে রোলব্যাক করা হয়েছে!', 'success');
+        },
+        null,
+        'রোলব্যাক নিশ্চিত করুন',
+        'রোলব্যাক করুন',
+        'বাতিল'
+      );
+    };
+  }
+
   // Bind custom confirm modal buttons
   const customConfirmOk = document.getElementById('custom-confirm-ok-btn');
   if (customConfirmOk && state.confirmModal) {
@@ -2076,8 +2561,10 @@ function bindEvents() {
                 hasValidationError = true;
                 validationMsg = `"${nameClean}" নামটি একাধিকবার ব্যবহার করা হয়েছে। প্রতিটি মেম্বার এর নাম ইউনিক হতে হবে!`;
               }
+              const isOrigRegistered = occ.isRegistered || false;
+              const isKeepingOrigName = (occ.originalName.toLowerCase() === nameClean.toLowerCase());
               const existingInDb = state.members.some(m => m.name.toLowerCase() === nameClean.toLowerCase());
-              if (existingInDb) {
+              if (existingInDb && !(isOrigRegistered && isKeepingOrigName)) {
                 hasValidationError = true;
                 validationMsg = `"${nameClean}" নামের মেম্বার ইতিমধ্যে ডাটাবেজে রেজিস্টার আছে! অনুগ্রহ করে ইউনিক নাম দিন।`;
               }
@@ -2527,25 +3014,33 @@ function bindEvents() {
     const saveBtn = document.getElementById('save-activity-btn');
     if (saveBtn) {
       saveBtn.onclick = () => {
-        // Run unregistered duplicates analysis first
-        const duplicates = analyzeUnregisteredDuplicates(state.bulkInputText);
+        // Run all duplicates analysis (both registered and unregistered)
+        const duplicates = analyzeAllDuplicates(state.bulkInputText);
         
         if (duplicates.length > 0) {
           // Construct duplicates list with default occurrences
+          const mListLocal = getMembers();
           const modalDuplicates = duplicates.map(d => {
             const occurrences = [];
+            // Check if this duplicate name matches any registered member in DB
+            const isRegistered = mListLocal.some(m => getNormalizedName(m.name) === getNormalizedName(d.name));
+            
             for (let i = 0; i < d.count; i++) {
               occurrences.push({
                 id: i,
                 originalName: d.name,
-                resolvedName: `${d.name} ${i + 1}`, // Default proposal: "Rakib Islam 1", "Rakib Islam 2"
-                skipped: false
+                resolvedName: isRegistered 
+                  ? (i === 0 ? d.name : `${d.name} ${i + 1}`) 
+                  : `${d.name} ${i + 1}`,
+                skipped: false,
+                isRegistered: isRegistered && i === 0
               });
             }
             return {
               name: d.name,
               count: d.count,
-              occurrences
+              occurrences,
+              isRegistered: isRegistered
             };
           });
 
@@ -2558,63 +3053,70 @@ function bindEvents() {
                   return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
                 };
 
-                // 1. Bulk register the resolved names!
-                const members = getMembers();
+                // 1. Bulk register new members for non-skipped renamed occurrences!
+                const mList = getMembers();
                 const auditTrails = getAuditTrails();
                 const adminName = ADMIN_NAMES[state.currentAdminEmail] || 'Unknown Admin';
-                let maxMemberNum = members.reduce((max, m) => m.member_number > max ? m.member_number : max, 0);
+                let maxMemberNum = mList.reduce((max, m) => m.member_number > max ? m.member_number : max, 0);
 
                 resolvedDuplicates.forEach(dup => {
                   dup.occurrences.forEach(occ => {
                     if (!occ.skipped) {
-                      maxMemberNum++;
                       const cleaned = cleanName(occ.resolvedName);
-                      members.push({
-                        id: generateUUID(),
-                        name: cleaned,
-                        display_name: `@${cleaned.replace(/\s+/g, '')}`,
-                        member_number: maxMemberNum,
-                        status: 'active',
-                        level: CONFIG.LEVELS.BRONZE,
-                        total_points: 0,
-                        current_streak: 0,
-                        longest_streak: 0,
-                        total_active_days: 0,
-                        last_active_date: null,
-                        consecutive_inactive_days: 0,
-                        notes: '',
-                        created_at: new Date().toISOString(),
-                        updated_at: new Date().toISOString()
-                      });
+                      const isAlreadyInDb = mList.some(m => getNormalizedName(m.name) === getNormalizedName(cleaned));
+                      
+                      if (!isAlreadyInDb) {
+                        maxMemberNum++;
+                        mList.push({
+                          id: generateUUID(),
+                          name: cleaned,
+                          display_name: `@${cleaned.replace(/\s+/g, '')}`,
+                          member_number: maxMemberNum,
+                          status: 'active',
+                          level: CONFIG.LEVELS.BRONZE,
+                          total_points: 0,
+                          current_streak: 0,
+                          longest_streak: 0,
+                          total_active_days: 0,
+                          last_active_date: null,
+                          consecutive_inactive_days: 0,
+                          notes: '',
+                          created_at: new Date().toISOString(),
+                          updated_at: new Date().toISOString()
+                        });
 
-                      auditTrails.unshift({
-                        id: `audit-${generateUUID()}`,
-                        admin_email: state.currentAdminEmail,
-                        admin_name: adminName,
-                        action: 'ADD_MEMBER',
-                        entity_type: 'MEMBER',
-                        description: `Registered resolved duplicate member: ${cleaned} (No. ${maxMemberNum})`,
-                        timestamp: new Date().toISOString()
-                      });
+                        auditTrails.unshift({
+                          id: `audit-${generateUUID()}`,
+                          admin_email: state.currentAdminEmail,
+                          admin_name: adminName,
+                          action: 'ADD_MEMBER',
+                          entity_type: 'MEMBER',
+                          description: `Registered resolved duplicate member: ${cleaned} (No. ${maxMemberNum})`,
+                          timestamp: new Date().toISOString()
+                        });
+                      }
                     }
                   });
                 });
 
-                saveMembers(members);
+                saveMembers(mList);
                 saveAuditTrails(auditTrails);
 
-                showToast('ডুপ্লিকেট মেম্বারদের ইউনিক নাম দিয়ে রেজিস্টার করা হয়েছে!', 'success');
+                showToast('ডুপ্লিকেট মেম্বার সমাধান করা হয়েছে!', 'success');
 
                 // 2. Map the occurrences in the daily submission activity list!
                 let nextText = state.bulkInputText;
                 
                 resolvedDuplicates.forEach(dup => {
-                  dup.occurrences.forEach(occ => {
-                    const regex = new RegExp(`@${escapeRegExp(dup.name)}`, 'i');
+                  let occurrenceCounter = 0;
+                  nextText = nextText.replace(new RegExp(`@${escapeRegExp(dup.name)}`, 'gi'), (match) => {
+                    const occ = dup.occurrences[occurrenceCounter];
+                    occurrenceCounter++;
+                    if (!occ) return match;
                     if (occ.skipped) {
-                      nextText = nextText.replace(regex, '');
+                      return '';
                     } else {
-                      nextText = nextText.replace(regex, `@${occ.resolvedName}`);
+                      return `@${occ.resolvedName}`;
                     }
                   });
                 });
@@ -2625,72 +3127,8 @@ function bindEvents() {
                   auditTrails: getAuditTrails()
                 });
 
-                // 3. Re-run parsing on the updated text and proceed
-                const { matchedMembers } = parseBulkActivityText(nextText);
-                if (matchedMembers.length === 0) return;
-
-                const frozenInList = matchedMembers.filter(m => m.status === 'frozen');
-                
-                const proceedWithSubmission = () => {
-                  if (frozenInList.length > 0) {
-                    const checkAndProcessFrozen = (index, currentMatchedIds, toReactivateIds) => {
-                      if (index >= frozenInList.length) {
-                        if (toReactivateIds.length > 0) {
-                          const mList = getMembers();
-                          toReactivateIds.forEach(id => {
-                            const idx = mList.findIndex(m => m.id === id);
-                            if (idx !== -1) {
-                              mList[idx].status = 'active';
-                              mList[idx].consecutive_inactive_days = 0;
-                              mList[idx].updated_at = new Date().toISOString();
-                            }
-                          });
-                          saveMembers(mList);
-                          showToast(`${toReactivateIds.length} জন ফ্রোজেন মেম্বার পুনরায় একটিভ করা হয়েছে।`, 'success');
-                        }
-
-                        const finalActiveIds = currentMatchedIds.filter(id => {
-                          const isFrozen = frozenInList.some(f => f.id === id);
-                          if (isFrozen) {
-                            return toReactivateIds.includes(id);
-                          }
-                          return true;
-                        });
-
-                        submitBulkActivity(state.bulkInputDate, finalActiveIds);
-                        return;
-                      }
-
-                      const frozenMember = frozenInList[index];
-                      showConfirm(
-                        `Daily Submission List-এ ফ্রোজেন মেম্বার <b>${frozenMember.name}</b> (No. ${frozenMember.member_number}) সনাক্ত হয়েছে।<br><br>আপনি কি তাকে পুনরায় <b>Reactivate (সক্রিয়)</b> করতে চান নাকি <b>Ignore (উপেক্ষা)</b> করতে চান?`,
-                        () => {
-                          toReactivateIds.push(frozenMember.id);
-                          checkAndProcessFrozen(index + 1, currentMatchedIds, toReactivateIds);
-                        },
-                        () => {
-                          checkAndProcessFrozen(index + 1, currentMatchedIds, toReactivateIds);
-                        },
-                        'ফ্রিজড মেম্বার সনাক্ত হয়েছে',
-                        'Reactivate Member',
-                        'Ignore'
-                      );
-                    };
-
-                    checkAndProcessFrozen(0, matchedMembers.map(m => m.id), []);
-                  } else {
-                    submitBulkActivity(state.bulkInputDate, matchedMembers.map(m => m.id));
-                  }
-                };
-
-                showConfirm(
-                  `আপনি কি সত্যিই নির্বাচিত তারিখ (${state.bulkInputDate}) এ ${matchedMembers.length} জন মেম্বারের ডেইলি এক্টিভিটি সেভ করতে চান?`,
-                  () => {
-                    proceedWithSubmission();
-                  },
-                  null,
-                  'এক্টিভিটি সেভ করুন'
-                );
+                // 3. Open Pending Submission Preview Flow instead of saving directly
+                openSubmissionPreviewFlow(state.bulkInputText, nextText, resolvedDuplicates);
               }
             }
           });
@@ -2698,71 +3136,7 @@ function bindEvents() {
         }
 
         // Standard flow when no duplicates exist
-        const { matchedMembers } = parseBulkActivityText(state.bulkInputText);
-        if (matchedMembers.length === 0) return;
-        
-        const frozenInList = matchedMembers.filter(m => m.status === 'frozen');
-        
-        const proceedWithSubmission = () => {
-          if (frozenInList.length > 0) {
-            const checkAndProcessFrozen = (index, currentMatchedIds, toReactivateIds) => {
-              if (index >= frozenInList.length) {
-                if (toReactivateIds.length > 0) {
-                  const members = getMembers();
-                  toReactivateIds.forEach(id => {
-                    const idx = members.findIndex(m => m.id === id);
-                    if (idx !== -1) {
-                      members[idx].status = 'active';
-                      members[idx].consecutive_inactive_days = 0;
-                      members[idx].updated_at = new Date().toISOString();
-                    }
-                  });
-                  saveMembers(members);
-                  showToast(`${toReactivateIds.length} জন ফ্রোজেন মেম্বার পুনরায় একটিভ করা হয়েছে।`, 'success');
-                }
-
-                const finalActiveIds = currentMatchedIds.filter(id => {
-                  const isFrozen = frozenInList.some(f => f.id === id);
-                  if (isFrozen) {
-                    return toReactivateIds.includes(id);
-                  }
-                  return true;
-                });
-
-                submitBulkActivity(state.bulkInputDate, finalActiveIds);
-                return;
-              }
-
-              const frozenMember = frozenInList[index];
-              showConfirm(
-                `Daily Submission List-এ ফ্রোজেন মেম্বার <b>${frozenMember.name}</b> (No. ${frozenMember.member_number}) সনাক্ত হয়েছে।<br><br>আপনি কি তাকে পুনরায় <b>Reactivate (সক্রিয়)</b> করতে চান নাকি <b>Ignore (উপেক্ষা)</b> করতে চান?`,
-                () => {
-                  toReactivateIds.push(frozenMember.id);
-                  checkAndProcessFrozen(index + 1, currentMatchedIds, toReactivateIds);
-                },
-                () => {
-                  checkAndProcessFrozen(index + 1, currentMatchedIds, toReactivateIds);
-                },
-                'ফ্রিজড মেম্বার সনাক্ত হয়েছে',
-                'Reactivate Member',
-                'Ignore'
-              );
-            };
-
-            checkAndProcessFrozen(0, matchedMembers.map(m => m.id), []);
-          } else {
-            submitBulkActivity(state.bulkInputDate, matchedMembers.map(m => m.id));
-          }
-        };
-
-        showConfirm(
-          `আপনি কি সত্যিই নির্বাচিত তারিখ (${state.bulkInputDate}) এ ${matchedMembers.length} জন মেম্বারের ডেইলি এক্টিভিটি সেভ করতে চান?`,
-          () => {
-            proceedWithSubmission();
-          },
-          null,
-          'এক্টিভিটি সেভ করুন'
-        );
+        openSubmissionPreviewFlow(state.bulkInputText, null, []);
       };
     }
 
@@ -2881,7 +3255,54 @@ function bindEvents() {
     const filterDaysSel = document.getElementById('notice-filter-days');
     if (filterDaysSel) {
       filterDaysSel.onchange = (e) => {
-        updateState({ noticeFilterDays: Number(e.target.value), copiedNotice: false, selectedFreezeMemberIds: [] });
+        const val = e.target.value;
+        if (val === 'custom') {
+          updateState({ noticeFilterDays: 10, copiedNotice: false, selectedFreezeMemberIds: [] });
+        } else {
+          updateState({ noticeFilterDays: Number(val), copiedNotice: false, selectedFreezeMemberIds: [] });
+        }
+      };
+    }
+
+    // Custom days input
+    const customDaysInp = document.getElementById('notice-custom-days');
+    if (customDaysInp) {
+      customDaysInp.oninput = (e) => {
+        const val = Number(e.target.value);
+        if (val > 0) {
+          updateState({ noticeFilterDays: val, copiedNotice: false, selectedFreezeMemberIds: [] });
+          // Re-focus because state update re-renders the DOM
+          const inp = document.getElementById('notice-custom-days');
+          if (inp) {
+            inp.focus();
+            inp.setSelectionRange(inp.value.length, inp.value.length);
+          }
+        }
+      };
+    }
+
+    // Notice Type Radio Buttons
+    document.querySelectorAll('input[name="notice-type-radio"]').forEach(radio => {
+      radio.onchange = (e) => {
+        updateState({ noticeType: e.target.value, copiedNotice: false });
+      };
+    });
+
+    // Freeze Select All Button
+    const selectAllBtn = document.getElementById('freeze-select-all-btn');
+    if (selectAllBtn) {
+      selectAllBtn.onclick = () => {
+        const warningMembers = state.members.filter(m => m.status !== 'frozen' && m.consecutive_inactive_days >= state.noticeFilterDays);
+        const allIds = warningMembers.map(m => m.id);
+        updateState({ selectedFreezeMemberIds: allIds });
+      };
+    }
+
+    // Freeze Unselect All Button
+    const unselectAllBtn = document.getElementById('freeze-unselect-all-btn');
+    if (unselectAllBtn) {
+      unselectAllBtn.onclick = () => {
+        updateState({ selectedFreezeMemberIds: [] });
       };
     }
 
@@ -3622,21 +4043,31 @@ function bindLoginEvents() {
         
         if (client) {
           try {
-            const { data, error } = await client.from('admins').select('*').eq('email', email);
-            if (!error && data && data.length > 0) {
-              const matchedAdmin = data[0];
-              const dbPass = matchedAdmin.password || matchedAdmin.pass;
-              if (dbPass && String(dbPass).trim() === String(password).trim()) {
-                success = true;
+            // First check if user can log in via Supabase Auth (Authentication -> Users)
+            const { data: authData, error: authError } = await client.auth.signInWithPassword({
+              email: email,
+              password: password
+            });
+            if (!authError && authData && authData.user) {
+              success = true;
+            } else {
+              // Fallback to table lookup in 'admins'
+              const { data, error } = await client.from('admins').select('*').eq('email', email);
+              if (!error && data && data.length > 0) {
+                const matchedAdmin = data[0];
+                const dbPass = matchedAdmin.password || matchedAdmin.pass;
+                if (dbPass && String(dbPass).trim() === String(password).trim()) {
+                  success = true;
+                }
               }
             }
           } catch (err) {
-            console.warn('Supabase admins table check failed, using fallback list:', err);
+            console.warn('Supabase authentication check failed, trying fallback lists:', err);
           }
         }
 
         const isPredefinedAdmin = Object.keys(ADMIN_NAMES).includes(email);
-        const isDefaultPassword = ['linkbox123', '123456', 'admin123'].includes(password);
+        const isDefaultPassword = ['linkbox123', '123456', 'admin123', 'SLBAD220'].includes(password);
         
         if (!success && isPredefinedAdmin && isDefaultPassword) {
           success = true;
@@ -3716,4 +4147,24 @@ window.addEventListener('DOMContentLoaded', () => {
   setInterval(() => {
     silentPullFromSupabase();
   }, 2 * 60 * 1000);
+
+  // Periodic countdown check for the undo last submission rollback card (runs every 1 second)
+  setInterval(() => {
+    if (state.lastSubmissionSnapshot) {
+      const elapsed = Date.now() - new Date(state.lastSubmissionSnapshot.timestamp).getTime();
+      const remaining = Math.max(0, 5 * 60 * 1000 - elapsed);
+      if (remaining <= 0) {
+        localStorage.removeItem('support_linkbox_last_submission_snapshot');
+        updateState({ lastSubmissionSnapshot: null });
+      } else {
+        const mins = Math.floor(remaining / 60000);
+        const secs = Math.floor((remaining % 60000) / 1000);
+        const countdownText = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+        const countdownEl = document.getElementById('undo-countdown');
+        if (countdownEl) {
+          countdownEl.textContent = countdownText;
+        }
+      }
+    }
+  }, 1000);
 });

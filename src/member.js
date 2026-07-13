@@ -279,6 +279,67 @@ export function analyzeUnregisteredDuplicates(text) {
   return duplicates;
 }
 
+// Helper to analyze all duplicate names (both registered and unregistered) from raw input text
+export function analyzeAllDuplicates(text) {
+  if (!text) return [];
+  
+  // 1. Extract ALL parsed raw names (preserving duplicates)
+  const allParsedNames = [];
+  const regex = /@([^\n\r0-9📅📆✅👇🅾️➤〰️💤⚠️\r\n\t(@]+)/g;
+  let match;
+  while ((match = regex.exec(text)) !== null) {
+    const extracted = match[1].trim();
+    if (extracted && extracted.length > 1) {
+      const cleaned = extracted.replace(/^[➤\s]+/, '').trim();
+      const cleanedFinal = cleanName(cleaned);
+      if (cleanedFinal) {
+        allParsedNames.push(cleanedFinal);
+      }
+    }
+  }
+  
+  if (allParsedNames.length === 0) {
+    const parts = text.split('@');
+    for (let i = 1; i < parts.length; i++) {
+      const part = parts[i];
+      const namePartMatch = part.match(/^([^0-9📅📆✅👇🅾️➤〰️💤⚠️\r\n\t(@]+)/);
+      if (namePartMatch) {
+        const cleaned = namePartMatch[1].trim();
+        const cleanedFinal = cleanName(cleaned);
+        if (cleanedFinal && cleanedFinal.length > 1) {
+          allParsedNames.push(cleanedFinal);
+        }
+      }
+    }
+  }
+  
+  // 2. Count frequencies of ALL parsed names using normalized names to group
+  const frequencies = {};
+  allParsedNames.forEach(name => {
+    const norm = getNormalizedName(name);
+    if (!frequencies[norm]) {
+      frequencies[norm] = {
+        originalName: name,
+        count: 0
+      };
+    }
+    frequencies[norm].count++;
+  });
+  
+  // 3. Extract duplicates (frequency >= 2)
+  const duplicates = [];
+  Object.keys(frequencies).forEach(norm => {
+    if (frequencies[norm].count >= 2) {
+      duplicates.push({
+        name: frequencies[norm].originalName,
+        count: frequencies[norm].count
+      });
+    }
+  });
+  
+  return duplicates;
+}
+
 // ----------------------------------------------------
 // SUB-FUNCTIONS FOR MEMBER VALUE RECALCULATIONS (Point 6)
 // ----------------------------------------------------
@@ -411,6 +472,16 @@ export function submitBulkActivity(dateStr, activeMemberIds) {
   const state = getState();
   const adminName = ADMIN_NAMES[state.currentAdminEmail] || 'Unknown Admin';
 
+  // Save rollback snapshot
+  const snapshot = {
+    timestamp: new Date().toISOString(),
+    submissionDate: dateStr,
+    membersState: JSON.parse(JSON.stringify(members)),
+    logsState: JSON.parse(JSON.stringify(logs)),
+    badgesState: JSON.parse(JSON.stringify(badges))
+  };
+  localStorage.setItem('support_linkbox_last_submission_snapshot', JSON.stringify(snapshot));
+
   const yesterdayStr = getYesterdayDateStr(dateStr);
   let loggedCount = 0;
   let dynamicBadgesList = [...badges];
@@ -499,7 +570,83 @@ export function submitBulkActivity(dateStr, activeMemberIds) {
     members: getMembers(),
     auditTrails: getAuditTrails(),
     bulkInputText: '',
-    uncheckedUnregisteredNames: []
+    uncheckedUnregisteredNames: [],
+    lastSubmissionSnapshot: snapshot
   });
   showToast('মেম্বার অ্যাক্টিভিটি এবং ডেইলি লিংক সফলভাবে সেভ করা হয়েছে!', 'success');
+}
+
+// Helper to calculate statistics for Pending Submission Preview
+export function calculateSubmissionStats(rawText, resolvedText, resolvedDuplicates = []) {
+  const members = getMembers();
+  
+  // 1. Calculate duplicates and skipped from resolvedDuplicates
+  let duplicateCount = 0;
+  let skippedCount = 0;
+  
+  if (resolvedDuplicates && resolvedDuplicates.length > 0) {
+    duplicateCount = resolvedDuplicates.length;
+    resolvedDuplicates.forEach(d => {
+      d.occurrences.forEach(occ => {
+        if (occ.skipped) {
+          skippedCount++;
+        }
+      });
+    });
+  } else {
+    // If we didn't go through duplicate resolution modal (i.e. no duplicates),
+    // let's run the analyzer just in case
+    const dups = analyzeAllDuplicates(rawText);
+    duplicateCount = dups.length;
+  }
+
+  // 2. Parse the resolved text (or raw text if no duplicates)
+  const textToParse = resolvedText || rawText;
+  const { parsedNames, matchedMembers, unregisteredNames } = parseBulkActivityText(textToParse);
+  
+  // 3. Count categories
+  let registeredCount = 0;
+  let frozenCount = 0;
+  let aliasCount = 0;
+  
+  matchedMembers.forEach(m => {
+    if (m.status === 'frozen') {
+      frozenCount++;
+    } else {
+      registeredCount++;
+    }
+    
+    // Check if matched on alias (display_name matches but name doesn't)
+    const normName = getNormalizedName(m.name);
+    const normDisp = getNormalizedName(m.display_name || '');
+    parsedNames.forEach(pn => {
+      const normPn = getNormalizedName(cleanName(pn));
+      if (normPn === normDisp && normPn !== normName) {
+        aliasCount++;
+      }
+    });
+  });
+
+  // 4. Count new members (unregistered ones)
+  const newCount = unregisteredNames.length;
+
+  // 5. Invalid name count:
+  const totalAtSymbols = (textToParse.match(/@/g) || []).length;
+  const invalidCount = Math.max(0, totalAtSymbols - parsedNames.length);
+
+  // 6. Total activity added
+  const totalActivityAdded = registeredCount;
+  
+  return {
+    submissionDate: getState().bulkInputDate,
+    totalParsed: parsedNames.length,
+    registeredCount,
+    newCount,
+    duplicateCount,
+    skippedCount,
+    frozenCount,
+    aliasCount,
+    invalidCount,
+    totalActivityAdded
+  };
 }
