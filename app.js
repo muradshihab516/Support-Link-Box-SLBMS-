@@ -2307,6 +2307,137 @@ ${listText}
   }
 }
 
+// Helper to analyze and open duplicate resolution modal
+function triggerDuplicateResolution(text, isAutoTrigger = false) {
+  const duplicates = analyzeAllDuplicates(text);
+  if (duplicates.length === 0) {
+    if (!isAutoTrigger) {
+      openSubmissionPreviewFlow(text, null, []);
+    }
+    return false;
+  }
+
+  const mListLocal = getMembers();
+  const modalDuplicates = duplicates.map(d => {
+    const occurrences = [];
+    const isRegistered = mListLocal.some(m => getNormalizedName(m.name) === getNormalizedName(d.name));
+    
+    for (let i = 0; i < d.count; i++) {
+      occurrences.push({
+        id: i,
+        originalName: d.name,
+        resolvedName: isRegistered 
+          ? (i === 0 ? d.name : `${d.name} ${i + 1}`) 
+          : `${d.name} ${i + 1}`,
+        skipped: false,
+        isRegistered: isRegistered && i === 0
+      });
+    }
+    return {
+      name: d.name,
+      count: d.count,
+      occurrences,
+      isRegistered: isRegistered
+    };
+  });
+
+  updateState({
+    duplicateResolutionModal: {
+      duplicates: modalDuplicates,
+      onResolve: (resolvedDuplicates) => {
+        const escapeRegExp = (string) => {
+          return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        };
+
+        // 1. Bulk register new members for non-skipped renamed occurrences!
+        const mList = getMembers();
+        const auditTrails = getAuditTrails();
+        const adminName = ADMIN_NAMES[state.currentAdminEmail] || 'Unknown Admin';
+        let maxMemberNum = mList.reduce((max, m) => m.member_number > max ? m.member_number : max, 0);
+
+        resolvedDuplicates.forEach(dup => {
+          dup.occurrences.forEach(occ => {
+            if (!occ.skipped) {
+              const cleaned = cleanName(occ.resolvedName);
+              const isAlreadyInDb = mList.some(m => getNormalizedName(m.name) === getNormalizedName(cleaned));
+              
+              if (!isAlreadyInDb) {
+                maxMemberNum++;
+                mList.push({
+                  id: generateUUID(),
+                  name: cleaned,
+                  display_name: `@${cleaned.replace(/\s+/g, '')}`,
+                  member_number: maxMemberNum,
+                  status: 'active',
+                  level: CONFIG.LEVELS.BRONZE,
+                  total_points: 0,
+                  current_streak: 0,
+                  longest_streak: 0,
+                  total_active_days: 0,
+                  last_active_date: null,
+                  consecutive_inactive_days: 0,
+                  notes: '',
+                  created_at: new Date().toISOString(),
+                  updated_at: new Date().toISOString()
+                });
+
+                auditTrails.unshift({
+                  id: `audit-${generateUUID()}`,
+                  admin_email: state.currentAdminEmail,
+                  admin_name: adminName,
+                  action: 'ADD_MEMBER',
+                  entity_type: 'MEMBER',
+                  description: `Registered resolved duplicate member: ${cleaned} (No. ${maxMemberNum})`,
+                  timestamp: new Date().toISOString()
+                });
+              }
+            }
+          });
+        });
+
+        saveMembers(mList);
+        saveAuditTrails(auditTrails);
+
+        showToast('ডুপ্লিকেট মেম্বার সমাধান করা হয়েছে এবং রিনেম করা মেম্বারদের রেজিস্টার করা হয়েছে!', 'success');
+
+        // 2. Map the occurrences in the daily submission activity list!
+        let nextText = text;
+        
+        resolvedDuplicates.forEach(dup => {
+          let occurrenceCounter = 0;
+          nextText = nextText.replace(new RegExp(`@${escapeRegExp(dup.name)}`, 'gi'), (match) => {
+            const occ = dup.occurrences[occurrenceCounter];
+            occurrenceCounter++;
+            if (!occ) return match;
+            if (occ.skipped) {
+              return ''; // skip/ignore
+            } else {
+              return `@${occ.resolvedName}`;
+            }
+          });
+        });
+
+        // Clean up empty lines from skipped entries
+        nextText = nextText.split('\n')
+          .filter(line => line.trim().length > 0)
+          .join('\n');
+
+        updateState({
+          bulkInputText: nextText,
+          members: getMembers(),
+          duplicateResolutionModal: null
+        });
+
+        if (!isAutoTrigger) {
+          openSubmissionPreviewFlow(text, nextText, resolvedDuplicates);
+        }
+      }
+    }
+  });
+
+  return true;
+}
+
 // Helper to open Pending Submission Preview Flow
 function openSubmissionPreviewFlow(rawText, resolvedText, resolvedDuplicates = []) {
   const textToParse = resolvedText || rawText;
@@ -2989,6 +3120,13 @@ Generated on: ${new Date().toLocaleString()}
           tx.setSelectionRange(start, end);
         }
       };
+
+      textarea.onpaste = (e) => {
+        setTimeout(() => {
+          const text = textarea.value;
+          triggerDuplicateResolution(text, true);
+        }, 100);
+      };
     }
 
     // Change date selector
@@ -3003,130 +3141,7 @@ Generated on: ${new Date().toLocaleString()}
     const saveBtn = document.getElementById('save-activity-btn');
     if (saveBtn) {
       saveBtn.onclick = () => {
-        // Run all duplicates analysis (both registered and unregistered)
-        const duplicates = analyzeAllDuplicates(state.bulkInputText);
-        
-        if (duplicates.length > 0) {
-          // Construct duplicates list with default occurrences
-          const mListLocal = getMembers();
-          const modalDuplicates = duplicates.map(d => {
-            const occurrences = [];
-            // Check if this duplicate name matches any registered member in DB
-            const isRegistered = mListLocal.some(m => getNormalizedName(m.name) === getNormalizedName(d.name));
-            
-            for (let i = 0; i < d.count; i++) {
-              occurrences.push({
-                id: i,
-                originalName: d.name,
-                resolvedName: isRegistered 
-                  ? (i === 0 ? d.name : `${d.name} ${i + 1}`) 
-                  : `${d.name} ${i + 1}`,
-                skipped: false,
-                isRegistered: isRegistered && i === 0
-              });
-            }
-            return {
-              name: d.name,
-              count: d.count,
-              occurrences,
-              isRegistered: isRegistered
-            };
-          });
-
-          updateState({
-            duplicateResolutionModal: {
-              duplicates: modalDuplicates,
-              onResolve: (resolvedDuplicates) => {
-                // Helper to escape regex
-                const escapeRegExp = (string) => {
-                  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                };
-
-                // 1. Bulk register new members for non-skipped renamed occurrences!
-                const mList = getMembers();
-                const auditTrails = getAuditTrails();
-                const adminName = ADMIN_NAMES[state.currentAdminEmail] || 'Unknown Admin';
-                let maxMemberNum = mList.reduce((max, m) => m.member_number > max ? m.member_number : max, 0);
-
-                resolvedDuplicates.forEach(dup => {
-                  dup.occurrences.forEach(occ => {
-                    if (!occ.skipped) {
-                      const cleaned = cleanName(occ.resolvedName);
-                      const isAlreadyInDb = mList.some(m => getNormalizedName(m.name) === getNormalizedName(cleaned));
-                      
-                      if (!isAlreadyInDb) {
-                        maxMemberNum++;
-                        mList.push({
-                          id: generateUUID(),
-                          name: cleaned,
-                          display_name: `@${cleaned.replace(/\s+/g, '')}`,
-                          member_number: maxMemberNum,
-                          status: 'active',
-                          level: CONFIG.LEVELS.BRONZE,
-                          total_points: 0,
-                          current_streak: 0,
-                          longest_streak: 0,
-                          total_active_days: 0,
-                          last_active_date: null,
-                          consecutive_inactive_days: 0,
-                          notes: '',
-                          created_at: new Date().toISOString(),
-                          updated_at: new Date().toISOString()
-                        });
-
-                        auditTrails.unshift({
-                          id: `audit-${generateUUID()}`,
-                          admin_email: state.currentAdminEmail,
-                          admin_name: adminName,
-                          action: 'ADD_MEMBER',
-                          entity_type: 'MEMBER',
-                          description: `Registered resolved duplicate member: ${cleaned} (No. ${maxMemberNum})`,
-                          timestamp: new Date().toISOString()
-                        });
-                      }
-                    }
-                  });
-                });
-
-                saveMembers(mList);
-                saveAuditTrails(auditTrails);
-
-                showToast('ডুপ্লিকেট মেম্বার সমাধান করা হয়েছে!', 'success');
-
-                // 2. Map the occurrences in the daily submission activity list!
-                let nextText = state.bulkInputText;
-                
-                resolvedDuplicates.forEach(dup => {
-                  let occurrenceCounter = 0;
-                  nextText = nextText.replace(new RegExp(`@${escapeRegExp(dup.name)}`, 'gi'), (match) => {
-                    const occ = dup.occurrences[occurrenceCounter];
-                    occurrenceCounter++;
-                    if (!occ) return match;
-                    if (occ.skipped) {
-                      return '';
-                    } else {
-                      return `@${occ.resolvedName}`;
-                    }
-                  });
-                });
-
-                const originalRawText = state.bulkInputText;
-                updateState({
-                  bulkInputText: nextText,
-                  members: getMembers(),
-                  auditTrails: getAuditTrails()
-                });
-
-                // 3. Open Pending Submission Preview Flow instead of saving directly
-                openSubmissionPreviewFlow(originalRawText, nextText, resolvedDuplicates);
-              }
-            }
-          });
-          return;
-        }
-
-        // Standard flow when no duplicates exist
-        openSubmissionPreviewFlow(state.bulkInputText, null, []);
+        triggerDuplicateResolution(state.bulkInputText, false);
       };
     }
 
