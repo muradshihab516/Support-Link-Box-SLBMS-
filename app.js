@@ -7,7 +7,7 @@ import {
   initializeDatabase, getMembers, saveMembers, getActivityLogs, saveActivityLogs, 
   getAuditTrails, saveAuditTrails, getBadges, saveBadges, getCurrentAdmin, setCurrentAdmin,
   cleanName, getNormalizedName, detectDateFromText, getYesterdayDateStr, getDiffDays, 
-  dataURLtoBlob, deduplicateMembers, registerSyncEnqueueHandler
+  dataURLtoBlob, deduplicateMembers, registerSyncEnqueueHandler, generateUUID
 } from './src/database.js';
 import { 
   getSupabase, setupSupabaseRealtime, initSupabaseConfig, testSupabaseConnection, 
