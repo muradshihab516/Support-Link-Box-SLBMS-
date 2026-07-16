@@ -7,7 +7,8 @@ import {
   initializeDatabase, getMembers, saveMembers, getActivityLogs, saveActivityLogs, 
   getAuditTrails, saveAuditTrails, getBadges, saveBadges, getCurrentAdmin, setCurrentAdmin,
   cleanName, getNormalizedName, detectDateFromText, getYesterdayDateStr, getDiffDays, 
-  dataURLtoBlob, deduplicateMembers, registerSyncEnqueueHandler, generateUUID
+  dataURLtoBlob, deduplicateMembers, registerSyncEnqueueHandler, generateUUID,
+  toBanglaNumber, getEmojiNumber
 } from './src/database.js';
 import { 
   getSupabase, setupSupabaseRealtime, initSupabaseConfig, testSupabaseConnection, 
@@ -1595,14 +1596,56 @@ export const supabase = createClient(supabaseUrl, supabaseKey)
     // TAB: NOTICE GENERATOR
     case 'notices': {
       // Inactive members query calculations (Excluding frozen members)
-      const warningMembers = state.members.filter(m => m.status !== 'frozen' && m.consecutive_inactive_days >= state.noticeFilterDays);
+      let warningMembers = state.members.filter(m => m.status !== 'frozen');
+      if (state.noticeFilterMode === 'exact') {
+        warningMembers = warningMembers.filter(m => m.consecutive_inactive_days === state.noticeFilterDays);
+      } else if (state.noticeFilterMode === 'less') {
+        warningMembers = warningMembers.filter(m => m.consecutive_inactive_days < state.noticeFilterDays);
+      } else {
+        warningMembers = warningMembers.filter(m => m.consecutive_inactive_days >= state.noticeFilterDays);
+      }
       
       const formatWarningNotice = () => {
         const dateStr = new Date().toLocaleDateString('bn-BD', { day: 'numeric', month: 'long', year: 'numeric' });
         
-        const listText = warningMembers.length > 0 
-          ? warningMembers.map((m, idx) => `${idx + 1}️⃣➤ ${m.name} (${m.consecutive_inactive_days} দিন ইনেক্টিভ)`).join('\n')
-          : '😴 বর্তমানে এই ফিল্টারে কোনো নিষ্ক্রিয় মেম্বার নেই!';
+        let listText = '';
+        if (warningMembers.length > 0) {
+          // Group members by consecutive_inactive_days
+          const groups = {};
+          warningMembers.forEach(m => {
+            const days = m.consecutive_inactive_days;
+            if (!groups[days]) {
+              groups[days] = [];
+            }
+            groups[days].push(m);
+          });
+
+          // Sort keys of group (days) ascending
+          const sortedDays = Object.keys(groups).map(Number).sort((a, b) => a - b);
+
+          let globalIdx = 0;
+          const groupTexts = sortedDays.map(days => {
+            const membersInGroup = groups[days];
+            const groupEmoji = days < 5 ? '🟢' : days < 7 ? '🟡' : days < 10 ? '🟠' : '🔴';
+            
+            // Format group headline: 📌 🟢 ৩ দিন Inactive (১২ জন)
+            const daysBn = toBanglaNumber(days);
+            const countBn = toBanglaNumber(membersInGroup.length);
+            const headline = `📌 ${groupEmoji} ${daysBn} দিন Inactive (${countBn} জন)`;
+            
+            // Format members under this group
+            const memberLines = membersInGroup.map(m => {
+              globalIdx++;
+              const emojiNum = getEmojiNumber(globalIdx);
+              return `${emojiNum}➤ ${m.name}`;
+            }).join('\n');
+            
+            return `${headline}\n${memberLines}`;
+          });
+          listText = groupTexts.join('\n\n');
+        } else {
+          listText = '😴 বর্তমানে এই ফিল্টারে কোনো নিষ্ক্রিয় মেম্বার নেই!';
+        }
 
         if (state.noticeType === 'alert') {
           return `⚠️ গ্রুপ ওয়ার্নিং নোটিশ (Alert Warning) ⚠️
@@ -1653,6 +1696,15 @@ ${listText}
         }
       };
 
+      let dynamicLabel = '';
+      if (state.noticeFilterMode === 'exact') {
+        dynamicLabel = `ঠিক ${toBanglaNumber(state.noticeFilterDays)} দিন`;
+      } else if (state.noticeFilterMode === 'less') {
+        dynamicLabel = `${toBanglaNumber(state.noticeFilterDays)} দিনের কম`;
+      } else {
+        dynamicLabel = `${toBanglaNumber(state.noticeFilterDays)} দিন বা তার বেশি`;
+      }
+
       return `
         <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
           
@@ -1699,14 +1751,14 @@ ${listText}
             <div class="space-y-4 bg-slate-950 p-4 rounded-xl border border-slate-800">
               <div>
                 <label class="block text-xs font-semibold text-slate-400 mb-1.5 flex justify-between font-sans">
-                  <span>Inactivity Threshold Filter</span>
-                  <span class="text-indigo-400 font-bold">${state.noticeFilterDays} Days or more</span>
+                  <span>Inactivity Days (নিষ্ক্রিয় দিন)</span>
+                  <span class="text-indigo-400 font-bold">${dynamicLabel}</span>
                 </label>
                 <select id="notice-filter-days" class="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-slate-200 cursor-pointer focus:outline-none focus:border-indigo-500">
-                  <option value="3" ${state.noticeFilterDays === 3 ? 'selected' : ''}>৩ দিন+ (3+ Days Inactive)</option>
-                  <option value="5" ${state.noticeFilterDays === 5 ? 'selected' : ''}>৫ দিন+ (5+ Days Inactive)</option>
-                  <option value="7" ${state.noticeFilterDays === 7 ? 'selected' : ''}>৭ দিন+ (7+ Days Inactive)</option>
-                  <option value="15" ${state.noticeFilterDays === 15 ? 'selected' : ''}>১৫ দিন+ (15+ Days Inactive)</option>
+                  <option value="3" ${state.noticeFilterDays === 3 ? 'selected' : ''}>৩ দিন (3 Days)</option>
+                  <option value="5" ${state.noticeFilterDays === 5 ? 'selected' : ''}>৫ দিন (5 Days)</option>
+                  <option value="7" ${state.noticeFilterDays === 7 ? 'selected' : ''}>৭ দিন (7 Days)</option>
+                  <option value="15" ${state.noticeFilterDays === 15 ? 'selected' : ''}>১৫ দিন (15 Days)</option>
                   <option value="custom" ${![3, 5, 7, 15].includes(state.noticeFilterDays) ? 'selected' : ''}>Custom Threshold (কাস্টম দিন)</option>
                 </select>
               </div>
@@ -1717,6 +1769,36 @@ ${listText}
                   <input type="number" id="notice-custom-days" min="1" max="180" value="${state.noticeFilterDays}" class="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500" />
                 </div>
               ` : ''}
+
+              <!-- Filter Mode Selection -->
+              <div class="pt-2.5 border-t border-slate-900">
+                <label class="block text-[10px] font-bold text-slate-400 mb-2 uppercase tracking-wider font-sans">Filter Mode (ফিল্টার মোড)</label>
+                <div class="grid grid-cols-1 gap-2">
+                  <label class="flex items-center gap-2.5 p-2 bg-slate-900/60 border ${state.noticeFilterMode === 'exact' ? 'border-indigo-500 bg-indigo-500/5' : 'border-slate-800'} rounded-xl hover:border-slate-700 transition cursor-pointer select-none">
+                    <input type="radio" name="notice-filter-mode" value="exact" ${state.noticeFilterMode === 'exact' ? 'checked' : ''} class="w-4 h-4 text-indigo-600 bg-slate-950 border-slate-800 focus:ring-indigo-500 cursor-pointer" />
+                    <div class="text-[11px]">
+                      <span class="block font-bold text-slate-200">Exactly ${state.noticeFilterDays} Days</span>
+                      <span class="block text-[9px] text-slate-400">শুধুমাত্র ঠিক ${toBanglaNumber(state.noticeFilterDays)} দিন নিষ্ক্রিয়</span>
+                    </div>
+                  </label>
+
+                  <label class="flex items-center gap-2.5 p-2 bg-slate-900/60 border ${state.noticeFilterMode === 'less' ? 'border-indigo-500 bg-indigo-500/5' : 'border-slate-800'} rounded-xl hover:border-slate-700 transition cursor-pointer select-none">
+                    <input type="radio" name="notice-filter-mode" value="less" ${state.noticeFilterMode === 'less' ? 'checked' : ''} class="w-4 h-4 text-indigo-600 bg-slate-950 border-slate-800 focus:ring-indigo-500 cursor-pointer" />
+                    <div class="text-[11px]">
+                      <span class="block font-bold text-slate-200">Less Than ${state.noticeFilterDays} Days</span>
+                      <span class="block text-[9px] text-slate-400">${toBanglaNumber(state.noticeFilterDays)} দিনের কম নিষ্ক্রিয়</span>
+                    </div>
+                  </label>
+
+                  <label class="flex items-center gap-2.5 p-2 bg-slate-900/60 border ${state.noticeFilterMode === 'above' ? 'border-indigo-500 bg-indigo-500/5' : 'border-slate-800'} rounded-xl hover:border-slate-700 transition cursor-pointer select-none">
+                    <input type="radio" name="notice-filter-mode" value="above" ${state.noticeFilterMode === 'above' ? 'checked' : ''} class="w-4 h-4 text-indigo-600 bg-slate-950 border-slate-800 focus:ring-indigo-500 cursor-pointer" />
+                    <div class="text-[11px]">
+                      <span class="block font-bold text-slate-200">${state.noticeFilterDays} Days & Above</span>
+                      <span class="block text-[9px] text-slate-400">${toBanglaNumber(state.noticeFilterDays)} দিন বা তার বেশি নিষ্ক্রিয়</span>
+                    </div>
+                  </label>
+                </div>
+              </div>
             </div>
 
             <button id="copy-notice-btn" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs py-3.5 rounded-xl shadow-[0_4px_12px_rgba(79,70,229,0.3)] transition-all flex items-center justify-center gap-2 cursor-pointer">
@@ -3575,11 +3657,25 @@ Generated on: ${new Date().toLocaleString()}
       };
     });
 
+    // Filter Mode Radio Buttons
+    document.querySelectorAll('input[name="notice-filter-mode"]').forEach(radio => {
+      radio.onchange = (e) => {
+        updateState({ noticeFilterMode: e.target.value, copiedNotice: false, selectedFreezeMemberIds: [] });
+      };
+    });
+
     // Freeze Select All Button
     const selectAllBtn = document.getElementById('freeze-select-all-btn');
     if (selectAllBtn) {
       selectAllBtn.onclick = () => {
-        const warningMembers = state.members.filter(m => m.status !== 'frozen' && m.consecutive_inactive_days >= state.noticeFilterDays);
+        let warningMembers = state.members.filter(m => m.status !== 'frozen');
+        if (state.noticeFilterMode === 'exact') {
+          warningMembers = warningMembers.filter(m => m.consecutive_inactive_days === state.noticeFilterDays);
+        } else if (state.noticeFilterMode === 'less') {
+          warningMembers = warningMembers.filter(m => m.consecutive_inactive_days < state.noticeFilterDays);
+        } else {
+          warningMembers = warningMembers.filter(m => m.consecutive_inactive_days >= state.noticeFilterDays);
+        }
         const allIds = warningMembers.map(m => m.id);
         updateState({ selectedFreezeMemberIds: allIds });
       };

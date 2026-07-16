@@ -387,3 +387,30 @@ export function getCurrentAdmin() {
 export function setCurrentAdmin(email) {
   localStorage.setItem(STORAGE_KEYS.CURRENT_ADMIN, email);
 }
+
+export function toBanglaNumber(num) {
+  if (num === null || num === undefined) return '';
+  const banglaDigits = {
+    '0': '০', '1': '১', '2': '২', '3': '৩', '4': '৪',
+    '5': '৫', '6': '৬', '7': '৭', '8': '৮', '9': '৯'
+  };
+  return num.toString().split('').map(d => banglaDigits[d] || d).join('');
+}
+
+export function getEmojiNumber(num) {
+  if (num === 10) return '🔟';
+  const digitMap = {
+    '0': '0️⃣',
+    '1': '1️⃣',
+    '2': '2️⃣',
+    '3': '3️⃣',
+    '4': '4️⃣',
+    '5': '5️⃣',
+    '6': '6️⃣',
+    '7': '7️⃣',
+    '8': '8️⃣',
+    '9': '9️⃣'
+  };
+  return num.toString().split('').map(d => digitMap[d] || d).join('');
+}
+

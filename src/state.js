@@ -17,6 +17,7 @@ let state = {
   bulkInputText: '',
   bulkInputDate: new Date().toISOString().split('T')[0],
   noticeFilterDays: 3,
+  noticeFilterMode: 'above',
   noticeType: 'simple',
   copiedNotice: false,
   leaderboardSearchQuery: '',
