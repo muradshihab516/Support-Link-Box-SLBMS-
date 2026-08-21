@@ -6,7 +6,8 @@ import { getState, updateState, subscribeState } from './src/state.js';
 import { 
   initializeDatabase, getMembers, saveMembers, getActivityLogs, saveActivityLogs, 
   getAuditTrails, saveAuditTrails, getBadges, saveBadges, getCurrentAdmin, setCurrentAdmin,
-  cleanName, getNormalizedName, detectDateFromText, getYesterdayDateStr, getDiffDays, 
+  cleanName, getNormalizedName, getUltraNormalizedName, findMatchingMember, findFuzzyMemberSuggestion,
+  detectDateFromText, getYesterdayDateStr, getDiffDays, 
   dataURLtoBlob, deduplicateMembers, registerSyncEnqueueHandler, generateUUID,
   toBanglaNumber, getEmojiNumber
 } from './src/database.js';
@@ -17,7 +18,10 @@ import {
 } from './src/supabase.js';
 import { 
   handleAddMember, handleBulkAddMembers, parseBulkActivityText, submitBulkActivity,
-  analyzeUnregisteredDuplicates, analyzeAllDuplicates, calculateSubmissionStats
+  analyzeUnregisteredDuplicates, analyzeAllDuplicates, calculateSubmissionStats,
+  recalculateAllMemberStatsFromLogs, addManualMemberLog, updateMemberLogStatus, deleteMemberLog,
+  updateActivityLog, deleteActivityLog,
+  updateMemberDetails, addMemberAlias, removeMemberAlias
 } from './src/member.js';
 import { showToast } from './src/toast.js';
 import { showAlert, showConfirm } from './src/modal.js';
@@ -607,35 +611,42 @@ function render() {
     </div>
     ` : ''}
 
+    ${renderMemberProfileModal()}
+
     ${state.unregisteredResolutionModal ? `
-    <!-- Custom beautiful unregistered names resolution modal -->
+    <!-- Custom beautiful unregistered names resolution modal with Fuzzy Suggestions -->
     <div id="unregistered-resolution-modal" class="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-[100] flex items-center justify-center p-4">
-      <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl relative space-y-4 animate-scale-in max-h-[90vh] overflow-y-auto">
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-xl w-full p-6 shadow-2xl relative space-y-4 animate-scale-in max-h-[90vh] overflow-y-auto">
         <div class="flex items-center gap-3 text-amber-500 border-b border-slate-800 pb-3">
           <div class="p-2 bg-amber-500/10 rounded-xl border border-amber-500/25">
             <i data-lucide="user-plus" class="w-6 h-6 animate-pulse"></i>
           </div>
           <div>
-            <h3 class="font-extrabold text-slate-100 text-sm tracking-wide uppercase">⚠️ Unregistered / New Member Detected</h3>
-            <p class="text-[10px] text-slate-400 font-semibold leading-relaxed mt-0.5">নিচের মেম্বারদের নাম ডাটাবেজে পাওয়া যায়নি।</p>
+            <h3 class="font-extrabold text-slate-100 text-sm tracking-wide uppercase">⚠️ Unregistered / Ambiguous Member Detected</h3>
+            <p class="text-[10px] text-slate-400 font-semibold leading-relaxed mt-0.5">নিচের নামগুলো ডাটাবেজের সাথে নিখুঁতভাবে মেলেনি। অনুগ্রহ করে অ্যাকশন নির্বাচন করুন।</p>
           </div>
         </div>
-        <p class="text-[11px] text-slate-300 font-medium leading-relaxed bg-amber-950/20 p-3 rounded-xl border border-amber-500/10">
-          অনুগ্রহ করে সিদ্ধান্ত নিন— <strong>Register</strong> (নতুন মেম্বার হিসেবে অ্যাড করুন), <strong>Rename</strong> (বানান ভুল থাকলে সঠিক নাম দিন) অথবা <strong>Skip / Ignore</strong> করুন।
-        </p>
 
-        <div class="space-y-4 divide-y divide-slate-800/60 max-h-[40vh] overflow-y-auto pr-1">
+        <div class="space-y-4 divide-y divide-slate-800/60 max-h-[45vh] overflow-y-auto pr-1">
           ${state.unregisteredResolutionModal.unregisteredNames.map((item, idx) => `
-            <div class="pt-3 space-y-3">
+            <div class="pt-3 space-y-2">
               <div class="flex items-center justify-between">
                 <span class="text-xs font-bold text-amber-400 font-mono">@${item.originalName}</span>
+                ${item.suggestedMember ? `
+                  <span class="text-[10px] bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 px-2 py-0.5 rounded-md font-bold">
+                    💡 Suggested: ${item.suggestedMember.name} (${Math.round(item.similarity * 100)}% match)
+                  </span>
+                ` : ''}
               </div>
               
               <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-950/50 p-3 rounded-xl border border-slate-800/40">
                 <div class="flex items-center gap-2">
                   <select class="unreg-action-select bg-slate-900 border border-slate-800 text-[10px] px-2 py-1 rounded-lg text-slate-300 font-bold focus:outline-none focus:border-indigo-500 cursor-pointer" data-unreg-idx="${idx}">
-                    <option value="register" ${item.action === 'register' ? 'selected' : ''}>Register</option>
-                    <option value="rename" ${item.action === 'rename' ? 'selected' : ''}>Rename</option>
+                    ${item.suggestedMember ? `
+                      <option value="link_alias" ${item.action === 'link_alias' ? 'selected' : ''}>Link as Alias to ${item.suggestedMember.name}</option>
+                    ` : ''}
+                    <option value="register" ${item.action === 'register' ? 'selected' : ''}>Register as New Member</option>
+                    <option value="rename" ${item.action === 'rename' ? 'selected' : ''}>Rename / Custom</option>
                     <option value="skip" ${item.action === 'skip' ? 'selected' : ''}>Skip / Ignore</option>
                   </select>
                 </div>
@@ -643,6 +654,8 @@ function render() {
                 <div class="flex items-center gap-2 flex-grow sm:justify-end">
                   ${item.action === 'skip' ? `
                     <span class="text-[10px] text-rose-400 font-bold bg-rose-500/10 px-2.5 py-1 rounded">Ignored</span>
+                  ` : item.action === 'link_alias' && item.suggestedMember ? `
+                    <span class="text-[10px] text-indigo-400 font-bold bg-indigo-500/10 px-2.5 py-1 rounded border border-indigo-500/20">Linked to #${item.suggestedMember.member_number}</span>
                   ` : `
                     <input type="text" value="${item.resolvedName}" class="unreg-resolved-input bg-slate-900 border border-slate-800 text-xs px-2.5 py-1.5 rounded-lg text-slate-200 font-semibold focus:outline-none focus:border-indigo-500 w-full max-w-[180px]" data-unreg-idx="${idx}" ${item.action === 'register' ? 'readonly disabled opacity-60' : ''} />
                   `}
@@ -813,6 +826,9 @@ function render() {
       </div>
     </div>
     ` : ''}
+
+    ${renderMemberProfileModal()}
+    ${renderActivityDetailModal()}
   `;
 
   // Hot Reload Icons
@@ -1386,8 +1402,8 @@ export const supabase = createClient(supabaseUrl, supabaseKey)
                   <tr class="hover:bg-slate-950/30 group transition">
                     <td class="py-3 px-5 text-center font-mono text-[11px] text-slate-500 font-bold">#${m.member_number}</td>
                     <td class="py-3 px-5">
-                      <div>
-                        <p class="font-bold text-slate-200 text-xs sm:text-sm">${m.name}</p>
+                      <div class="cursor-pointer group/name" data-open-profile="${m.id}" title="Click to view Member Profile & History">
+                        <p class="font-bold text-slate-200 text-xs sm:text-sm group-hover/name:text-indigo-400 transition flex items-center gap-1.5">${m.name} <i data-lucide="user" class="w-3 h-3 text-indigo-400 opacity-0 group-hover/name:opacity-100 transition"></i></p>
                         <p class="text-[10px] text-indigo-400 mt-0.5">${m.display_name}</p>
                       </div>
                     </td>
@@ -2034,7 +2050,7 @@ ${listText}
               <div class="grid grid-cols-3 gap-2 items-end pt-2 pb-5 border-b border-slate-850/60">
                 
                 <!-- 2nd Place (Silver Medal) -->
-                <div class="flex flex-col items-center space-y-1.5 text-center pb-2.5 bg-slate-950/20 border border-slate-850 rounded-xl p-2 h-36 justify-end relative">
+                <div class="flex flex-col items-center space-y-1.5 text-center pb-2.5 bg-slate-950/20 border border-slate-850 rounded-xl p-2 h-36 justify-end relative cursor-pointer" ${topActive[1] ? `data-open-profile="${topActive[1].id}"` : ''}>
                   <span class="absolute top-1 left-2 text-[10px] text-slate-400 font-bold font-mono">#2</span>
                   <div class="relative">
                     <div class="w-10 h-10 rounded-full bg-slate-850 border-2 border-slate-400 flex items-center justify-center text-slate-300 font-bold text-xs shadow-md">
@@ -2051,7 +2067,7 @@ ${listText}
                 </div>
 
                 <!-- 1st Place (Gold Medal & Crown) -->
-                <div class="flex flex-col items-center space-y-1.5 text-center pb-3.5 bg-gradient-to-t from-yellow-500/5 to-slate-950/30 border-2 border-yellow-500/40 rounded-2xl p-2 h-44 justify-end relative shadow-[0_0_15px_rgba(234,179,8,0.15)]">
+                <div class="flex flex-col items-center space-y-1.5 text-center pb-3.5 bg-gradient-to-t from-yellow-500/5 to-slate-950/30 border-2 border-yellow-500/40 rounded-2xl p-2 h-44 justify-end relative shadow-[0_0_15px_rgba(234,179,8,0.15)] cursor-pointer" ${topActive[0] ? `data-open-profile="${topActive[0].id}"` : ''}>
                   <div class="absolute -top-3 text-yellow-400 text-sm animate-bounce">👑</div>
                   <span class="absolute top-1 left-2 text-[10px] text-yellow-400 font-bold font-mono">#1</span>
                   <div class="relative">
@@ -2069,7 +2085,7 @@ ${listText}
                 </div>
 
                 <!-- 3rd Place (Bronze Medal) -->
-                <div class="flex flex-col items-center space-y-1.5 text-center pb-2.5 bg-slate-950/20 border border-slate-850 rounded-xl p-2 h-32 justify-end relative">
+                <div class="flex flex-col items-center space-y-1.5 text-center pb-2.5 bg-slate-950/20 border border-slate-850 rounded-xl p-2 h-32 justify-end relative cursor-pointer" ${topActive[2] ? `data-open-profile="${topActive[2].id}"` : ''}>
                   <span class="absolute top-1 left-2 text-[10px] text-amber-700 font-bold font-mono">#3</span>
                   <div class="relative">
                     <div class="w-10 h-10 rounded-full bg-slate-850 border-2 border-amber-600 flex items-center justify-center text-amber-500 font-bold text-xs shadow-md">
@@ -2089,7 +2105,7 @@ ${listText}
 
               <div class="space-y-2 max-h-[320px] overflow-y-auto pr-1">
                 ${activeList.length > 0 ? activeList.map((m, idx) => `
-                  <div class="flex items-center justify-between bg-slate-950/40 hover:bg-slate-950 border border-slate-850 hover:border-slate-800 p-3 rounded-xl transition duration-150">
+                  <div class="flex items-center justify-between bg-slate-950/40 hover:bg-slate-950 border border-slate-850 hover:border-slate-800 p-3 rounded-xl transition duration-150 cursor-pointer group" data-open-profile="${m.id}" title="Click to view Member Profile">
                     <div class="flex items-center gap-3">
                       <div class="w-6 h-6 rounded-full bg-slate-950 border border-slate-850 flex items-center justify-center text-[10px] font-bold ${
                         idx === 0 ? 'text-yellow-400 bg-yellow-400/5' :
@@ -2097,7 +2113,7 @@ ${listText}
                         idx === 2 ? 'text-amber-600 bg-amber-600/5' : 'text-slate-500'
                       }">${idx + 1}</div>
                       <div>
-                        <p class="text-xs font-bold text-slate-200">${m.name}</p>
+                        <p class="text-xs font-bold text-slate-200 group-hover:text-indigo-400 transition">${m.name}</p>
                         <p class="text-[9px] text-slate-500 font-medium">Lvl: ${m.level} | ID: #${m.member_number}</p>
                       </div>
                     </div>
@@ -2143,7 +2159,7 @@ ${listText}
               <div class="grid grid-cols-3 gap-2 items-end pt-2 pb-5 border-b border-slate-850/60">
                 
                 <!-- 2nd Most Inactive -->
-                <div class="flex flex-col items-center space-y-1.5 text-center pb-2.5 bg-slate-950/20 border border-slate-850 rounded-xl p-2 h-36 justify-end relative">
+                <div class="flex flex-col items-center space-y-1.5 text-center pb-2.5 bg-slate-950/20 border border-slate-850 rounded-xl p-2 h-36 justify-end relative cursor-pointer" ${topInactive[1] ? `data-open-profile="${topInactive[1].id}"` : ''}>
                   <span class="absolute top-1 left-2 text-[10px] text-rose-400 font-bold font-mono">#2</span>
                   <div class="relative">
                     <div class="w-10 h-10 rounded-full bg-slate-900 border-2 border-rose-500/50 flex items-center justify-center text-rose-400 font-bold text-xs shadow-md">
@@ -2160,7 +2176,7 @@ ${listText}
                 </div>
 
                 <!-- 1st Most Inactive -->
-                <div class="flex flex-col items-center space-y-1.5 text-center pb-3.5 bg-gradient-to-t from-rose-950/15 to-slate-950/30 border-2 border-rose-600/50 rounded-2xl p-2 h-44 justify-end relative shadow-[0_0_15px_rgba(239,68,68,0.15)]">
+                <div class="flex flex-col items-center space-y-1.5 text-center pb-3.5 bg-gradient-to-t from-rose-950/15 to-slate-950/30 border-2 border-rose-600/50 rounded-2xl p-2 h-44 justify-end relative shadow-[0_0_15px_rgba(239,68,68,0.15)] cursor-pointer" ${topInactive[0] ? `data-open-profile="${topInactive[0].id}"` : ''}>
                   <div class="absolute -top-3 text-rose-500 text-[9px] font-bold bg-rose-950/90 border border-rose-500/40 px-2 py-0.5 rounded-full uppercase tracking-wider animate-pulse">💀 Danger</div>
                   <span class="absolute top-1 left-2 text-[10px] text-rose-500 font-bold font-mono">#1</span>
                   <div class="relative">
@@ -2178,7 +2194,7 @@ ${listText}
                 </div>
 
                 <!-- 3rd Most Inactive -->
-                <div class="flex flex-col items-center space-y-1.5 text-center pb-2.5 bg-slate-950/20 border border-slate-850 rounded-xl p-2 h-32 justify-end relative">
+                <div class="flex flex-col items-center space-y-1.5 text-center pb-2.5 bg-slate-950/20 border border-slate-850 rounded-xl p-2 h-32 justify-end relative cursor-pointer" ${topInactive[2] ? `data-open-profile="${topInactive[2].id}"` : ''}>
                   <span class="absolute top-1 left-2 text-[10px] text-orange-400 font-bold font-mono">#3</span>
                   <div class="relative">
                     <div class="w-10 h-10 rounded-full bg-slate-900 border-2 border-orange-500/50 flex items-center justify-center text-orange-400 font-bold text-xs shadow-md">
@@ -2198,11 +2214,11 @@ ${listText}
 
               <div class="space-y-2 max-h-[320px] overflow-y-auto pr-1">
                 ${inactiveList.length > 0 ? inactiveList.map((m, idx) => `
-                  <div class="flex items-center justify-between bg-slate-950/40 hover:bg-slate-950 border border-slate-850 hover:border-slate-800 p-3 rounded-xl transition duration-150">
+                  <div class="flex items-center justify-between bg-slate-950/40 hover:bg-slate-950 border border-slate-850 hover:border-slate-800 p-3 rounded-xl transition duration-150 cursor-pointer group" data-open-profile="${m.id}" title="Click to view Member Profile">
                     <div class="flex items-center gap-3">
                       <div class="w-6 h-6 rounded-full bg-slate-950 border border-slate-800 flex items-center justify-center text-[10px] font-bold text-rose-400">${idx + 1}</div>
                       <div>
-                        <p class="text-xs font-bold text-slate-200">${m.name}</p>
+                        <p class="text-xs font-bold text-slate-200 group-hover:text-rose-400 transition">${m.name}</p>
                         <p class="text-[9px] text-slate-500 font-medium">ID: #${m.member_number} | Level: ${m.level}</p>
                       </div>
                     </div>
@@ -2409,16 +2425,23 @@ ${listText}
 
                   <!-- Submission Logs history list -->
                   <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl">
-                    <h3 class="font-bold text-slate-200 text-xs tracking-wider uppercase mb-3 flex items-center gap-1">
-                      <i data-lucide="check-circle" class="w-4 h-4 text-emerald-400"></i> Recent Submission Logs
-                    </h3>
-                    <div class="max-h-40 overflow-y-auto space-y-1.5 pr-1 divide-y divide-slate-850/50">
+                    <div class="flex items-center justify-between mb-3">
+                      <h3 class="font-bold text-slate-200 text-xs tracking-wider uppercase flex items-center gap-1.5">
+                        <i data-lucide="check-circle" class="w-4 h-4 text-emerald-400"></i> Recent Submission Logs
+                      </h3>
+                      <span class="text-[10px] text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded font-mono">Click for details</span>
+                    </div>
+                    <div class="max-h-48 overflow-y-auto space-y-1.5 pr-1 divide-y divide-slate-850/50">
                       ${allLogs.length > 0 ? allLogs.map(log => `
-                        <div class="flex justify-between items-center text-xs py-2 font-mono">
-                          <span class="text-slate-300">${log.activity_date}</span>
+                        <div data-open-activity-detail="${log.id}" data-member-id="${state.reportSelectedMemberId}" class="flex justify-between items-center text-xs py-2 font-mono hover:bg-slate-950/60 p-2 rounded-xl cursor-pointer transition group">
                           <div class="flex items-center gap-2">
-                            <span class="text-[10px] bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded font-bold uppercase">Success</span>
-                            <span class="text-[10px] text-slate-500">Submitted by: ${log.submitted_by}</span>
+                            <span class="w-2 h-2 rounded-full ${log.is_active ? 'bg-emerald-400' : 'bg-rose-400'}"></span>
+                            <span class="text-slate-300 font-bold group-hover:text-indigo-300 transition">${formatLogDate(log.activity_date)}</span>
+                          </div>
+                          <div class="flex items-center gap-2">
+                            <span class="text-[10px] ${log.is_active ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'} px-2 py-0.5 rounded font-bold uppercase">${log.is_active ? 'Active' : 'Inactive'}</span>
+                            <span class="text-[10px] text-slate-500">By: ${ADMIN_NAMES[log.submitted_by] || log.submitted_by || 'Admin'}</span>
+                            <i data-lucide="chevron-right" class="w-3.5 h-3.5 text-slate-600 group-hover:text-indigo-400 transition"></i>
                           </div>
                         </div>
                       `).join('') : `
@@ -2446,7 +2469,763 @@ ${listText}
   }
 }
 
-// Helper to analyze and open unregistered member resolution modal
+// Helper to render Member Profile Modal with 4 sub-tabs
+function renderMemberProfileModal() {
+  if (!state.memberProfileModal) return '';
+  const memberId = state.memberProfileModal.memberId;
+  const member = state.members.find(m => m.id === memberId);
+  if (!member) return '';
+
+  const activeTab = state.memberProfileModal.currentTab || 'overview';
+  const allLogs = getActivityLogs().filter(l => l.member_id === memberId).sort((a, b) => new Date(b.activity_date).getTime() - new Date(a.activity_date).getTime());
+  const allBadges = getBadges().filter(b => b.member_id === memberId);
+  const aliases = Array.isArray(member.aliases) ? member.aliases : [];
+
+  return `
+    <div id="member-profile-modal-overlay" class="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-[100] flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+      <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-2xl w-full p-5 sm:p-7 shadow-[0_25px_60px_rgba(0,0,0,0.85)] relative space-y-5 animate-scale-in my-auto max-h-[92vh] flex flex-col overflow-hidden">
+        
+        <!-- Header -->
+        <div class="flex items-start justify-between border-b border-slate-800 pb-4 gap-3 shrink-0">
+          <div class="flex items-center gap-3">
+            <div class="w-12 h-12 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-2xl shadow-inner">
+              ${member.level === 'Diamond' ? '💎' : member.level === 'Gold' ? '⭐' : member.level === 'Silver' ? '🥈' : '🥉'}
+            </div>
+            <div>
+              <div class="flex items-center gap-2">
+                <h3 class="font-extrabold text-slate-100 text-base sm:text-lg">${member.name}</h3>
+                <span class="text-[9px] font-black uppercase px-2 py-0.5 rounded-full ${
+                  member.status === 'active' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
+                  member.status === 'warning' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
+                  member.status === 'frozen' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' :
+                  'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                }">● ${member.status}</span>
+              </div>
+              <p class="text-xs text-indigo-400 font-mono mt-0.5">${member.display_name || ''} <span class="text-slate-500 ml-1 font-bold">#${member.member_number}</span></p>
+            </div>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <button id="modal-download-png-btn" data-member-id="${member.id}" class="bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xs px-3.5 py-2 rounded-xl shadow-lg transition flex items-center gap-1.5 cursor-pointer" ${state.isDownloadingReport ? 'disabled' : ''}>
+              <i data-lucide="download" class="w-3.5 h-3.5"></i>
+              <span class="hidden sm:inline">${state.isDownloadingReport ? 'Downloading...' : 'Report PNG'}</span>
+            </button>
+            <button id="close-member-profile-modal-btn" class="text-slate-400 hover:text-slate-200 bg-slate-950 p-2 rounded-xl border border-slate-800 transition cursor-pointer">
+              <i data-lucide="x" class="w-4 h-4"></i>
+            </button>
+          </div>
+        </div>
+
+        <!-- Inner Navigation Tabs -->
+        <div class="flex items-center gap-1.5 border-b border-slate-800 pb-2.5 shrink-0 overflow-x-auto scrollbar-none">
+          ${[
+            { id: 'overview', label: '📊 Overview & Stats' },
+            { id: 'history', label: `📅 History (${allLogs.length})` },
+            { id: 'edit', label: '✏️ Edit Profile' },
+            { id: 'aliases', label: `🏷️ Aliases (${aliases.length})` }
+          ].map(tab => `
+            <button data-profile-tab="${tab.id}" class="px-3 py-1.5 rounded-xl text-xs font-bold transition whitespace-nowrap cursor-pointer ${
+              activeTab === tab.id
+                ? 'bg-indigo-600/15 text-indigo-400 border border-indigo-500/30'
+                : 'bg-slate-950/60 text-slate-400 hover:text-slate-200 border border-transparent'
+            }">
+              ${tab.label}
+            </button>
+          `).join('')}
+        </div>
+
+        <!-- Tab Contents (Scrollable body) -->
+        <div class="overflow-y-auto pr-1 flex-grow space-y-4">
+          
+          ${activeTab === 'overview' ? `
+            <!-- Overview Tab -->
+            <div class="space-y-4">
+              <!-- 4 Stat Cards -->
+              <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div class="bg-slate-950 border border-slate-800/80 p-3 rounded-2xl text-center">
+                  <div class="text-xl mb-1">🏆</div>
+                  <p class="text-[9px] text-slate-500 uppercase font-bold">Total Points</p>
+                  <p class="text-base font-black text-slate-200 font-mono">${member.total_points} Pts</p>
+                </div>
+                <div class="bg-slate-950 border border-slate-800/80 p-3 rounded-2xl text-center">
+                  <div class="text-xl mb-1">🔥</div>
+                  <p class="text-[9px] text-slate-500 uppercase font-bold">Current Streak</p>
+                  <p class="text-base font-black text-rose-400 font-mono">${member.current_streak} Days</p>
+                </div>
+                <div class="bg-slate-950 border border-slate-800/80 p-3 rounded-2xl text-center">
+                  <div class="text-xl mb-1">✨</div>
+                  <p class="text-[9px] text-slate-500 uppercase font-bold">Longest Streak</p>
+                  <p class="text-base font-black text-indigo-400 font-mono">${member.longest_streak} Days</p>
+                </div>
+                <div class="bg-slate-950 border border-slate-800/80 p-3 rounded-2xl text-center">
+                  <div class="text-xl mb-1">⭐</div>
+                  <p class="text-[9px] text-slate-500 uppercase font-bold">Level Tier</p>
+                  <p class="text-base font-black text-emerald-400 font-mono">${member.level}</p>
+                </div>
+              </div>
+
+              <!-- Diagnostics breakdown -->
+              <div class="bg-slate-950/60 border border-slate-800/80 p-4 rounded-2xl space-y-2.5">
+                <h4 class="text-xs font-bold text-slate-300 uppercase tracking-wide">Activity Status Details</h4>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                  <div class="flex justify-between border-b border-slate-800/60 pb-1.5">
+                    <span class="text-slate-500">Inactivity Counter:</span>
+                    <span class="font-bold ${member.consecutive_inactive_days > 0 ? 'text-rose-400' : 'text-emerald-400'} font-mono">${member.consecutive_inactive_days} Days Inactive</span>
+                  </div>
+                  <div class="flex justify-between border-b border-slate-800/60 pb-1.5">
+                    <span class="text-slate-500">Total Active Submissions:</span>
+                    <span class="text-slate-200 font-bold font-mono">${member.total_active_days} Days</span>
+                  </div>
+                  <div class="flex justify-between border-b border-slate-800/60 pb-1.5">
+                    <span class="text-slate-500">Last Active Date:</span>
+                    <span class="text-slate-200 font-bold font-mono">${member.last_active_date || 'N/A'}</span>
+                  </div>
+                  <div class="flex justify-between border-b border-slate-800/60 pb-1.5">
+                    <span class="text-slate-500">Member Status:</span>
+                    <span class="font-bold uppercase ${member.status === 'active' ? 'text-emerald-400' : 'text-rose-400'}">${member.status}</span>
+                  </div>
+                </div>
+
+                ${member.notes ? `
+                  <div class="pt-2">
+                    <span class="text-[10px] text-slate-500 font-bold uppercase">Admin Notes / Remarks:</span>
+                    <p class="text-xs text-slate-300 mt-0.5 bg-slate-900/60 p-2.5 rounded-xl border border-slate-800">${member.notes}</p>
+                  </div>
+                ` : ''}
+              </div>
+
+              <!-- Quick Action Bar -->
+              <div class="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800">
+                <button data-toggle-freeze-profile="${member.id}" class="px-3.5 py-2 rounded-xl text-xs font-bold border transition cursor-pointer ${
+                  member.status === 'frozen' 
+                    ? 'bg-blue-500/10 text-blue-400 border-blue-500/30 hover:bg-blue-500/20' 
+                    : 'bg-slate-950 text-slate-300 border-slate-800 hover:text-blue-400'
+                }">
+                  ${member.status === 'frozen' ? '❄️ Unfreeze Member' : '❄️ Freeze Member Activity'}
+                </button>
+                <button data-profile-tab="history" class="px-3.5 py-2 rounded-xl text-xs font-bold bg-indigo-600/15 text-indigo-400 border border-indigo-500/30 hover:bg-indigo-600/25 transition cursor-pointer">
+                  + Add Manual Submission
+                </button>
+              </div>
+            </div>
+          ` : ''}
+
+          ${activeTab === 'history' ? `
+            <!-- Activity History Tab -->
+            <div class="space-y-4">
+              <!-- Add Manual Submission Log Accordion/Card -->
+              <div class="bg-slate-950 border border-slate-800/80 p-4 rounded-2xl space-y-3">
+                <div class="flex items-center justify-between border-b border-slate-800/60 pb-2">
+                  <h4 class="text-xs font-bold text-indigo-400 uppercase tracking-wide flex items-center gap-1.5">
+                    <i data-lucide="plus-circle" class="w-3.5 h-3.5"></i>
+                    Add Manual Submission Log
+                  </h4>
+                  <span class="text-[10px] text-slate-500">Auto-recalculates streaks & levels</span>
+                </div>
+                
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  <div>
+                    <label class="text-[10px] text-slate-400 font-bold uppercase block mb-1">Date</label>
+                    <input id="profile-log-date-input" type="date" value="${state.memberProfileModal.manualLogDate || new Date().toISOString().split('T')[0]}" class="w-full bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 font-mono" />
+                  </div>
+                  <div>
+                    <label class="text-[10px] text-slate-400 font-bold uppercase block mb-1">Points</label>
+                    <input id="profile-log-points-input" type="number" value="${state.memberProfileModal.manualLogPoints !== undefined ? state.memberProfileModal.manualLogPoints : 10}" class="w-full bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 font-mono" />
+                  </div>
+                  <div>
+                    <label class="text-[10px] text-slate-400 font-bold uppercase block mb-1">Status</label>
+                    <select id="profile-log-status-select" class="w-full bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 cursor-pointer">
+                      <option value="true">Active (Approved)</option>
+                      <option value="false">Inactive / Missed</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div class="flex justify-end pt-1">
+                  <button id="profile-save-log-btn" data-member-id="${member.id}" class="bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xs px-4 py-2 rounded-xl shadow-md transition flex items-center gap-1.5 cursor-pointer">
+                    <i data-lucide="check" class="w-3.5 h-3.5"></i>
+                    Save Submission
+                  </button>
+                </div>
+              </div>
+
+              <!-- History Timeline Table -->
+              <div class="space-y-2">
+                <div class="flex items-center justify-between">
+                  <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wide">Submission History Timeline (${allLogs.length})</h4>
+                  <span class="text-[10px] text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded font-mono font-semibold">Click any row for details</span>
+                </div>
+                
+                <div class="max-h-[280px] overflow-y-auto space-y-2 pr-1">
+                  ${allLogs.length > 0 ? allLogs.map(log => {
+                    const formattedDate = formatLogDate(log.activity_date);
+                    const adminName = ADMIN_NAMES[log.submitted_by] || log.submitted_by || 'Admin';
+                    const sourceName = log.source || (log.id && log.id.startsWith('manual-') ? 'Manual Entry' : 'Daily Submission');
+                    return `
+                      <div class="flex items-center justify-between bg-slate-950/70 border border-slate-800/80 hover:border-indigo-500/50 p-3 rounded-2xl transition group shadow-sm">
+                        <div data-open-activity-detail="${log.id}" data-member-id="${member.id}" class="flex items-center gap-3 cursor-pointer flex-grow min-w-0 pr-2">
+                          <div class="w-8 h-8 rounded-xl ${log.is_active ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'} flex items-center justify-center font-bold shrink-0">
+                            <i data-lucide="${log.is_active ? 'check' : 'x'}" class="w-4 h-4"></i>
+                          </div>
+                          <div class="min-w-0">
+                            <div class="flex items-center gap-2">
+                              <span class="text-xs font-bold text-slate-100 font-mono group-hover:text-indigo-300 transition">${formattedDate}</span>
+                              <span class="text-[9px] font-bold px-1.5 py-0.5 rounded ${log.is_active ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'}">${log.is_active ? 'Active' : 'Inactive'}</span>
+                            </div>
+                            <p class="text-[10px] text-slate-500 mt-0.5 flex items-center gap-1.5 truncate">
+                              <span>By: <b class="text-slate-400">${adminName}</b></span>
+                              <span>•</span>
+                              <span>${sourceName}</span>
+                            </p>
+                          </div>
+                        </div>
+
+                        <div class="flex items-center gap-2 shrink-0">
+                          <span class="text-xs font-black font-mono mr-1 ${log.is_active ? 'text-indigo-400' : 'text-slate-500'}">
+                            +${log.points_earned !== undefined ? log.points_earned : (log.is_active ? 10 : 0)} Pts
+                          </span>
+                          <button data-open-activity-detail="${log.id}" data-member-id="${member.id}" title="View Activity Details" class="text-[10px] font-bold text-indigo-400 bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/20 px-2.5 py-1.5 rounded-xl transition flex items-center gap-1 cursor-pointer">
+                            <i data-lucide="eye" class="w-3 h-3"></i> Details
+                          </button>
+                          <button data-toggle-log-status="${log.id}" title="Toggle Active/Inactive" class="p-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-indigo-400 border border-slate-800 cursor-pointer transition">
+                            <i data-lucide="refresh-cw" class="w-3 h-3"></i>
+                          </button>
+                          <button data-delete-log="${log.id}" title="Delete Log" class="p-1.5 rounded-xl bg-slate-900 hover:bg-rose-950/40 text-slate-400 hover:text-rose-400 border border-slate-800 cursor-pointer transition">
+                            <i data-lucide="trash-2" class="w-3 h-3"></i>
+                          </button>
+                        </div>
+                      </div>
+                    `;
+                  }).join('') : `
+                    <p class="text-xs text-slate-500 italic text-center py-6">কোনো সাবমিশন হিস্টোরি পাওয়া যায়নি।</p>
+                  `}
+                </div>
+              </div>
+            </div>
+          ` : ''}
+
+          ${activeTab === 'edit' ? `
+            <!-- Edit Profile Tab -->
+            <div class="space-y-4">
+              <div class="bg-slate-950 border border-slate-800/80 p-4 rounded-2xl space-y-3">
+                <div>
+                  <label class="text-[10px] text-slate-400 font-bold uppercase block mb-1">Full Name</label>
+                  <input id="profile-edit-name-input" type="text" value="${member.name}" class="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500" />
+                </div>
+                
+                <div>
+                  <label class="text-[10px] text-slate-400 font-bold uppercase block mb-1">Display Name / Username</label>
+                  <input id="profile-edit-display-input" type="text" value="${member.display_name || ''}" class="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 font-mono" />
+                </div>
+
+                <div>
+                  <label class="text-[10px] text-slate-400 font-bold uppercase block mb-1">Admin Notes / Remarks</label>
+                  <textarea id="profile-edit-notes-input" rows="3" class="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 resize-none">${member.notes || ''}</textarea>
+                </div>
+
+                <div class="flex justify-end pt-2">
+                  <button id="profile-save-details-btn" data-member-id="${member.id}" class="bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xs px-5 py-2.5 rounded-xl shadow-lg transition cursor-pointer flex items-center gap-1.5">
+                    <i data-lucide="save" class="w-3.5 h-3.5"></i>
+                    Save Profile Changes
+                  </button>
+                </div>
+              </div>
+            </div>
+          ` : ''}
+
+          ${activeTab === 'aliases' ? `
+            <!-- Aliases Tab -->
+            <div class="space-y-4">
+              <div class="bg-slate-950/60 border border-slate-800/80 p-4 rounded-2xl space-y-2">
+                <h4 class="text-xs font-bold text-slate-300 uppercase tracking-wide">Name Aliases & Nicknames</h4>
+                <p class="text-[11px] text-slate-400 leading-relaxed">
+                  মেম্বার যে সমস্ত ভিন্ন নাম, টাইপো বা নিকনেইম দিয়ে লিংক জমা দেন, সেগুলো এখানে যোগ করুন। ডেইলি সাবমিশন প্রসেস করার সময় সিস্টেম স্বয়ংক্রিয়ভাবে এই মেম্বারের সাথে ম্যাচ করবে।
+                </p>
+              </div>
+
+              <!-- Add New Alias Form -->
+              <div class="flex items-center gap-2 bg-slate-950 border border-slate-800/80 p-3 rounded-2xl">
+                <input id="profile-new-alias-input" type="text" placeholder="যেমন: S. M. Jakaria বা Jakaria H." class="bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 flex-grow" />
+                <button id="profile-add-alias-btn" data-member-id="${member.id}" class="bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xs px-4 py-2 rounded-xl shadow-md transition cursor-pointer flex items-center gap-1 shrink-0">
+                  <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+                  Add Alias
+                </button>
+              </div>
+
+              <!-- Current Aliases List -->
+              <div class="space-y-2">
+                <h5 class="text-[10px] text-slate-500 font-bold uppercase">Linked Aliases (${aliases.length})</h5>
+                ${aliases.length > 0 ? `
+                  <div class="flex flex-wrap gap-2">
+                    ${aliases.map(alias => `
+                      <div class="flex items-center gap-1.5 bg-slate-950 border border-slate-800 px-3 py-1.5 rounded-xl text-xs text-slate-300 font-mono">
+                        <span>@${alias}</span>
+                        <button data-remove-alias="${alias}" data-member-id="${member.id}" class="text-slate-500 hover:text-rose-400 p-0.5 cursor-pointer transition">
+                          <i data-lucide="x" class="w-3 h-3"></i>
+                        </button>
+                      </div>
+                    `).join('')}
+                  </div>
+                ` : `
+                  <p class="text-xs text-slate-500 italic py-3">কোনো অতিরিক্ত Alias যোগ করা নেই।</p>
+                `}
+              </div>
+            </div>
+          ` : ''}
+
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// Helper to format date into DD-MM-YY
+function formatLogDate(dateStr) {
+  if (!dateStr) return 'N/A';
+  try {
+    const parts = dateStr.split('-');
+    if (parts.length === 3) {
+      const day = parts[2].padStart(2, '0');
+      const month = parts[1].padStart(2, '0');
+      const year = parts[0].slice(-2);
+      return `${day}-${month}-${year}`;
+    }
+  } catch (e) {}
+  return dateStr;
+}
+
+// Helper to format timestamp into DD-MM-YY HH:mm
+function formatLogTimestamp(isoStr) {
+  if (!isoStr) return 'N/A';
+  try {
+    const d = new Date(isoStr);
+    if (!isNaN(d.getTime())) {
+      const day = String(d.getDate()).padStart(2, '0');
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const year = String(d.getFullYear()).slice(-2);
+      const hours = String(d.getHours()).padStart(2, '0');
+      const mins = String(d.getMinutes()).padStart(2, '0');
+      return `${day}-${month}-${year} ${hours}:${mins}`;
+    }
+  } catch (e) {}
+  return isoStr;
+}
+
+// Helper to render Activity Detail Modal
+function renderActivityDetailModal() {
+  if (!state.activityDetailModal) return '';
+  const { logId, memberId, isEditing } = state.activityDetailModal;
+  const logs = getActivityLogs();
+  const log = logs.find(l => l.id === logId);
+  const member = state.members.find(m => m.id === (log ? log.member_id : memberId));
+
+  if (!log) {
+    return `
+      <div id="activity-detail-modal-overlay" class="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-[120] flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-sm w-full p-6 shadow-2xl space-y-4 text-center animate-scale-in">
+          <p class="text-xs text-rose-400 font-bold">অ্যাক্টিভিটি রেকর্ড খুঁজে পাওয়া যায়নি অথবা মুছে ফেলা হয়েছে।</p>
+          <button id="close-activity-detail-modal-btn" class="bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs px-4 py-2 rounded-xl transition cursor-pointer">
+            বন্ধ করুন
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  const memberName = member ? member.name : 'Unknown Member';
+  const memberNum = member ? `#${member.member_number}` : '';
+  const adminDisplayName = ADMIN_NAMES[log.submitted_by] || log.submitted_by || 'Md Shihab Khan';
+  const formattedDate = formatLogDate(log.activity_date);
+  const formattedTimestamp = formatLogTimestamp(log.created_at || log.timestamp || new Date().toISOString());
+  const sourceName = log.source || (log.id && log.id.startsWith('manual-') ? 'Manual Entry' : 'Daily Submission');
+
+  return `
+    <div id="activity-detail-modal-overlay" class="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-[120] flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+      <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-lg w-full p-5 sm:p-7 shadow-[0_25px_60px_rgba(0,0,0,0.9)] relative space-y-5 animate-scale-in my-auto">
+        
+        <!-- Header -->
+        <div class="flex items-start justify-between border-b border-slate-800 pb-4 gap-3">
+          <div class="flex items-center gap-3">
+            <div class="w-11 h-11 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400">
+              <i data-lucide="calendar-check-2" class="w-6 h-6"></i>
+            </div>
+            <div>
+              <div class="flex items-center gap-2">
+                <h3 class="font-extrabold text-slate-100 text-base sm:text-lg">Activity Details</h3>
+                <span class="text-[9px] font-black uppercase px-2 py-0.5 rounded-full ${
+                  log.is_active ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                }">● ${log.is_active ? 'Active' : 'Inactive'}</span>
+              </div>
+              <p class="text-xs text-indigo-400 font-mono mt-0.5">${memberName} <span class="text-slate-500 font-bold">${memberNum}</span></p>
+            </div>
+          </div>
+
+          <button id="close-activity-detail-modal-btn" class="text-slate-400 hover:text-slate-200 bg-slate-950 p-2 rounded-xl border border-slate-800 transition cursor-pointer">
+            <i data-lucide="x" class="w-4 h-4"></i>
+          </button>
+        </div>
+
+        ${!isEditing ? `
+          <!-- Read-Only View of Requested Details -->
+          <div class="space-y-4">
+            <div class="bg-slate-950/80 border border-slate-800/80 rounded-2xl p-4 space-y-3.5 divide-y divide-slate-850">
+              
+              <!-- Activity Date -->
+              <div class="flex items-center justify-between pt-1">
+                <div>
+                  <p class="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Activity Date</p>
+                  <p class="text-sm font-black text-slate-100 font-mono mt-0.5">${formattedDate}</p>
+                </div>
+                <span class="text-[10px] bg-slate-900 border border-slate-800 px-2 py-1 rounded-md text-slate-400 font-mono">${log.activity_date}</span>
+              </div>
+
+              <!-- Status -->
+              <div class="flex items-center justify-between pt-3">
+                <div>
+                  <p class="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Status</p>
+                  <p class="text-xs font-black mt-0.5 ${log.is_active ? 'text-emerald-400' : 'text-rose-400'} flex items-center gap-1.5">
+                    <span class="w-2 h-2 rounded-full ${log.is_active ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'}"></span>
+                    ${log.is_active ? 'Active (Approved)' : 'Inactive (Missed)'}
+                  </p>
+                </div>
+                <span class="text-xs font-black font-mono ${log.is_active ? 'text-indigo-400' : 'text-slate-500'}">
+                  +${log.points_earned !== undefined ? log.points_earned : (log.is_active ? 10 : 0)} Pts
+                </span>
+              </div>
+
+              <!-- Submitted By -->
+              <div class="flex items-center justify-between pt-3">
+                <div>
+                  <p class="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Submitted By</p>
+                  <p class="text-xs font-bold text-slate-200 mt-0.5 flex items-center gap-1.5">
+                    <i data-lucide="user-check" class="w-3.5 h-3.5 text-indigo-400"></i>
+                    ${adminDisplayName}
+                  </p>
+                </div>
+                <span class="text-[10px] text-slate-500 font-mono">${log.submitted_by || 'Admin'}</span>
+              </div>
+
+              <!-- Submitted At -->
+              <div class="flex items-center justify-between pt-3">
+                <div>
+                  <p class="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Submitted At</p>
+                  <p class="text-xs font-bold text-slate-200 font-mono mt-0.5 flex items-center gap-1.5">
+                    <i data-lucide="clock" class="w-3.5 h-3.5 text-indigo-400"></i>
+                    ${formattedTimestamp}
+                  </p>
+                </div>
+                <span class="text-[9px] text-slate-500">Timestamp</span>
+              </div>
+
+              <!-- Source -->
+              <div class="flex items-center justify-between pt-3">
+                <div>
+                  <p class="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Source</p>
+                  <p class="text-xs font-bold text-slate-200 mt-0.5 flex items-center gap-1.5">
+                    <i data-lucide="layers" class="w-3.5 h-3.5 text-indigo-400"></i>
+                    ${sourceName}
+                  </p>
+                </div>
+                <span class="text-[10px] bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 px-2 py-0.5 rounded-md font-bold">${sourceName}</span>
+              </div>
+
+              <!-- Activity ID -->
+              <div class="flex items-center justify-between pt-3">
+                <div class="min-w-0 flex-grow pr-2">
+                  <p class="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Activity ID</p>
+                  <p class="text-[11px] font-mono text-slate-300 truncate mt-0.5">${log.id}</p>
+                </div>
+                <button data-copy-activity-id="${log.id}" class="text-[10px] bg-slate-900 hover:bg-slate-800 text-indigo-400 hover:text-indigo-300 border border-slate-800 px-2.5 py-1.5 rounded-lg font-bold flex items-center gap-1 cursor-pointer transition shrink-0">
+                  <i data-lucide="copy" class="w-3 h-3"></i> Copy ID
+                </button>
+              </div>
+
+            </div>
+
+            <!-- Audit Trail notice badge -->
+            <div class="bg-indigo-950/30 border border-indigo-500/20 rounded-xl p-3 flex items-center gap-2 text-[11px] text-indigo-300">
+              <i data-lucide="shield-check" class="w-4 h-4 text-indigo-400 shrink-0"></i>
+              <span>Authorized Admin can Edit/Delete this activity. All operations will automatically be recorded in Audit Log.</span>
+            </div>
+
+            <!-- Action Buttons for Admin -->
+            <div class="flex items-center justify-between pt-2">
+              <button data-delete-activity-detail="${log.id}" class="bg-rose-950/40 hover:bg-rose-900/50 border border-rose-800/60 text-rose-300 hover:text-white font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer">
+                <i data-lucide="trash-2" class="w-3.5 h-3.5"></i> Delete Activity
+              </button>
+
+              <div class="flex items-center gap-2">
+                <button id="close-activity-detail-modal-secondary-btn" class="bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs px-4 py-2.5 rounded-xl transition cursor-pointer">
+                  Close
+                </button>
+                <button data-start-edit-activity="${log.id}" class="bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xs px-5 py-2.5 rounded-xl shadow-lg transition flex items-center gap-1.5 cursor-pointer">
+                  <i data-lucide="edit-3" class="w-3.5 h-3.5"></i> Edit Activity
+                </button>
+              </div>
+            </div>
+          </div>
+        ` : `
+          <!-- Edit Form Mode -->
+          <div class="space-y-4">
+            <div class="bg-slate-950 border border-slate-800 p-4 rounded-2xl space-y-3.5">
+              <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+                <h4 class="text-xs font-bold text-indigo-400 uppercase tracking-wide flex items-center gap-1.5">
+                  <i data-lucide="edit-2" class="w-3.5 h-3.5"></i> Edit Activity Record
+                </h4>
+                <span class="text-[10px] text-amber-400 font-bold flex items-center gap-1">
+                  <i data-lucide="shield-alert" class="w-3 h-3"></i> Will log to Audit Trail
+                </span>
+              </div>
+
+              <div class="space-y-3">
+                <!-- Activity Date -->
+                <div>
+                  <label class="text-[10px] text-slate-400 font-bold uppercase block mb-1">Activity Date</label>
+                  <input id="edit-activity-date-input" type="date" value="${log.activity_date}" class="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 font-mono" />
+                </div>
+
+                <!-- Status & Points -->
+                <div class="grid grid-cols-2 gap-3">
+                  <div>
+                    <label class="text-[10px] text-slate-400 font-bold uppercase block mb-1">Status</label>
+                    <select id="edit-activity-status-select" class="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 cursor-pointer">
+                      <option value="true" ${log.is_active ? 'selected' : ''}>Active (Approved)</option>
+                      <option value="false" ${!log.is_active ? 'selected' : ''}>Inactive / Missed</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label class="text-[10px] text-slate-400 font-bold uppercase block mb-1">Points Earned</label>
+                    <input id="edit-activity-points-input" type="number" value="${log.points_earned !== undefined ? log.points_earned : (log.is_active ? 10 : 0)}" class="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 font-mono" />
+                  </div>
+                </div>
+
+                <!-- Source -->
+                <div>
+                  <label class="text-[10px] text-slate-400 font-bold uppercase block mb-1">Source</label>
+                  <select id="edit-activity-source-select" class="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 cursor-pointer">
+                    <option value="Daily Submission" ${sourceName === 'Daily Submission' ? 'selected' : ''}>Daily Submission</option>
+                    <option value="Manual Entry" ${sourceName === 'Manual Entry' ? 'selected' : ''}>Manual Entry</option>
+                    <option value="Direct Import" ${sourceName === 'Direct Import' ? 'selected' : ''}>Direct Import</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <!-- Edit Buttons -->
+            <div class="flex items-center justify-end gap-3 pt-2">
+              <button data-cancel-activity-edit class="bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs px-4 py-2.5 rounded-xl transition cursor-pointer">
+                Cancel
+              </button>
+              <button data-save-activity-edit="${log.id}" class="bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xs px-6 py-2.5 rounded-xl shadow-lg transition flex items-center gap-1.5 cursor-pointer">
+                <i data-lucide="check" class="w-3.5 h-3.5"></i> Save & Record to Audit
+              </button>
+            </div>
+          </div>
+        `}
+
+      </div>
+    </div>
+  `;
+}
+
+// Global helper to open activity detail modal
+function openActivityDetail(logId, memberId) {
+  updateState({
+    activityDetailModal: {
+      logId,
+      memberId,
+      isEditing: false
+    }
+  });
+}
+
+// Global helper to open member profile modal
+function openMemberProfile(memberId) {
+  updateState({
+    memberProfileModal: {
+      memberId: memberId,
+      currentTab: 'overview',
+      manualLogDate: new Date().toISOString().split('T')[0],
+      manualLogPoints: 10
+    }
+  });
+}
+
+// Helper to generate and download high-resolution PNG Performance Card
+function downloadMemberReportCardPng(memberId) {
+  const member = state.members.find(m => m.id === memberId);
+  if (!member) {
+    showToast('মেম্বার খুঁজে পাওয়া যায়নি!', 'error');
+    return;
+  }
+
+  updateState({ isDownloadingReport: true });
+  showToast('পারফরম্যান্স রিপোর্ট কার্ড তৈরি হচ্ছে...', 'info');
+
+  setTimeout(() => {
+    const html2canvasFn = window.html2canvas || (typeof html2canvas !== 'undefined' ? html2canvas : null);
+    if (!html2canvasFn) {
+      showToast('ডাউনলোড ব্যর্থ: html2canvas লাইব্রেরি লোড হয়নি। পেজ রিফ্রেশ করুন।', 'error');
+      updateState({ isDownloadingReport: false });
+      return;
+    }
+
+    const allBadges = getBadges().filter(b => b.member_id === memberId);
+
+    // Create custom offscreen rendering element for pristine PNG export
+    const container = document.createElement('div');
+    container.style.position = 'fixed';
+    container.style.top = '0px';
+    container.style.left = '-9999px';
+    container.style.width = '760px';
+    container.style.height = 'auto';
+    container.style.zIndex = '-9999';
+    container.style.margin = '0';
+    container.style.boxSizing = 'border-box';
+    container.style.backgroundColor = '#020617';
+    container.style.color = '#f8fafc';
+    container.style.fontFamily = 'system-ui, -apple-system, sans-serif';
+
+    container.innerHTML = `
+      <div style="background-color: #020617; border: 1px solid #1e293b; border-radius: 16px; padding: 32px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.8); position: relative; overflow: hidden;">
+        <!-- Header -->
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 1px solid #1e293b; padding-bottom: 20px;">
+          <div>
+            <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px;">
+              <span style="font-size: 11px; background: linear-gradient(to right, #4f46e5, #7c3aed); color: #ffffff; font-weight: 800; padding: 4px 12px; border-radius: 8px; text-transform: uppercase; letter-spacing: 0.1em;">
+                Support Link Box
+              </span>
+              <span style="font-size: 9px; background: #0f172a; color: #94a3b8; border: 1px solid #1e293b; padding: 4px 10px; border-radius: 8px; font-weight: 700; text-transform: uppercase;">
+                Official Performance Card
+              </span>
+            </div>
+            <h2 style="font-size: 24px; font-weight: 800; color: #f8fafc; margin: 8px 0 0 0;">
+              ${member.name}
+            </h2>
+            <p style="font-size: 12px; font-weight: 600; color: #64748b; margin: 2px 0 0 0;">
+              ${member.display_name || ''}
+            </p>
+          </div>
+          <div style="text-align: right; font-family: monospace;">
+            <p style="font-size: 11px; color: #94a3b8; font-weight: 700; text-transform: uppercase; margin: 0;">Member Serial</p>
+            <p style="font-size: 22px; font-weight: 900; color: #818cf8; margin: 4px 0 0 0;">#${member.member_number}</p>
+          </div>
+        </div>
+
+        <!-- 4 Stat Cards -->
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 24px;">
+          <div style="background-color: rgba(15, 23, 42, 0.7); border: 1px solid #1e293b; border-radius: 12px; padding: 14px; text-align: center;">
+            <div style="font-size: 20px; margin-bottom: 4px;">🏆</div>
+            <p style="font-size: 9px; color: #64748b; text-transform: uppercase; font-weight: 700; margin: 0;">Total Points</p>
+            <p style="font-size: 17px; font-weight: 900; color: #f8fafc; font-family: monospace; margin: 4px 0 0 0;">${member.total_points} Pts</p>
+          </div>
+          <div style="background-color: rgba(15, 23, 42, 0.7); border: 1px solid #1e293b; border-radius: 12px; padding: 14px; text-align: center;">
+            <div style="font-size: 20px; margin-bottom: 4px;">🔥</div>
+            <p style="font-size: 9px; color: #64748b; text-transform: uppercase; font-weight: 700; margin: 0;">Current Streak</p>
+            <p style="font-size: 17px; font-weight: 900; color: #fb7185; font-family: monospace; margin: 4px 0 0 0;">${member.current_streak} Days</p>
+          </div>
+          <div style="background-color: rgba(15, 23, 42, 0.7); border: 1px solid #1e293b; border-radius: 12px; padding: 14px; text-align: center;">
+            <div style="font-size: 20px; margin-bottom: 4px;">✨</div>
+            <p style="font-size: 9px; color: #64748b; text-transform: uppercase; font-weight: 700; margin: 0;">Longest Streak</p>
+            <p style="font-size: 17px; font-weight: 900; color: #818cf8; font-family: monospace; margin: 4px 0 0 0;">${member.longest_streak} Days</p>
+          </div>
+          <div style="background-color: rgba(15, 23, 42, 0.7); border: 1px solid #1e293b; border-radius: 12px; padding: 14px; text-align: center;">
+            <div style="font-size: 20px; margin-bottom: 4px;">⭐</div>
+            <p style="font-size: 9px; color: #64748b; text-transform: uppercase; font-weight: 700; margin: 0;">Group Level</p>
+            <p style="font-size: 17px; font-weight: 900; color: #34d399; font-family: monospace; margin: 4px 0 0 0;">${member.level}</p>
+          </div>
+        </div>
+
+        <!-- Diagnostics & Details -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 24px; border-top: 1px solid #1e293b; padding-top: 20px;">
+          <div>
+            <p style="font-size: 12px; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; margin: 0 0 12px 0;">Activity Diagnostics</p>
+            <div style="font-size: 12px; color: #cbd5e1;">
+              <div style="display: flex; justify-content: space-between; border-bottom: 1px solid rgba(30, 41, 59, 0.5); padding-bottom: 6px; margin-bottom: 6px;">
+                <span style="color: #64748b;">Current Status:</span>
+                <span style="font-weight: 700; color: ${member.status === 'active' ? '#34d399' : '#f43f5e'}; text-transform: capitalize;">● ${member.status}</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; border-bottom: 1px solid rgba(30, 41, 59, 0.5); padding-bottom: 6px; margin-bottom: 6px;">
+                <span style="color: #64748b;">Total Active Days:</span>
+                <span style="font-weight: 700; font-family: monospace;">${member.total_active_days} Days</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; border-bottom: 1px solid rgba(30, 41, 59, 0.5); padding-bottom: 6px; margin-bottom: 6px;">
+                <span style="color: #64748b;">Inactivity Counter:</span>
+                <span style="font-weight: 700; color: #f43f5e; font-family: monospace;">${member.consecutive_inactive_days} Days</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; padding-top: 2px;">
+                <span style="color: #64748b;">Last Active Date:</span>
+                <span style="font-weight: 700; font-family: monospace; color: #e2e8f0;">${member.last_active_date || 'N/A'}</span>
+              </div>
+            </div>
+          </div>
+
+          <div style="background-color: rgba(15, 23, 42, 0.5); border: 1px solid #1e293b; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; justify-content: space-between;">
+            <div>
+              <p style="font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase; margin: 0 0 8px 0;">
+                🏅 Earned Badges (${allBadges.length})
+              </p>
+              ${allBadges.length > 0 ? `
+                <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                  ${allBadges.map(b => `
+                    <span style="background: #020617; border: 1px solid #1e293b; padding: 3px 8px; border-radius: 6px; font-size: 10px; font-weight: 700; color: #cbd5e1; font-family: monospace;">${b.badge_name}</span>
+                  `).join('')}
+                </div>
+              ` : `
+                <p style="font-size: 11px; color: #64748b; font-style: italic; margin: 4px 0;">No badges earned yet.</p>
+              `}
+            </div>
+            <div style="border-top: 1px solid rgba(30, 41, 59, 0.5); padding-top: 10px; margin-top: 12px; display: flex; justify-content: space-between; font-size: 10px; color: #64748b; font-family: monospace;">
+              <span>Generated: ${new Date().toISOString().split('T')[0]}</span>
+              <span style="color: #818cf8; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase;">★ SUPPORT LINK BOX ★</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(container);
+
+    const filename = `${member.name.replace(/\s+/g, '_')}_Performance_Card.png`;
+
+    const options = {
+      scale: 2,
+      useCORS: true,
+      allowTaint: true,
+      backgroundColor: '#020617',
+      logging: false
+    };
+
+    html2canvasFn(container, options).then(canvas => {
+      document.body.removeChild(container);
+      try {
+        const imgData = canvas.toDataURL('image/png');
+        const a = document.createElement('a');
+        a.href = imgData;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+
+        showToast(`"${filename}" ডাউনলোড সম্পন্ন হয়েছে!`, 'success');
+        updateState({ isDownloadingReport: false });
+      } catch (e) {
+        showToast('ছবি তৈরি হয়েছে কিন্তু সরাসরি ডাউনলোড করা যায়নি।', 'info');
+        updateState({ isDownloadingReport: false });
+      }
+    }).catch(err => {
+      if (container && container.parentNode) {
+        document.body.removeChild(container);
+      }
+      console.error('Report card generation error:', err);
+      showToast('রিপোর্ট কার্ড তৈরি করতে সমস্যা হয়েছে!', 'error');
+      updateState({ isDownloadingReport: false });
+    });
+  }, 300);
+}
+
+// Helper to analyze and open unregistered member resolution modal with Fuzzy Matching AI suggestions
 function triggerUnregisteredResolution(text, onComplete) {
   const { unregisteredNames } = parseBulkActivityText(text);
   if (unregisteredNames.length === 0) {
@@ -2454,28 +3233,49 @@ function triggerUnregisteredResolution(text, onComplete) {
     return false;
   }
 
-  const modalNames = unregisteredNames.map(name => ({
-    originalName: name,
-    action: 'register', // default action: register as a new member
-    resolvedName: name
-  }));
+  const mList = getMembers();
+  const modalNames = unregisteredNames.map(name => {
+    const fuzzySuggestion = findFuzzyMemberSuggestion(name, mList, 0.45);
+    const hasStrongMatch = fuzzySuggestion && (fuzzySuggestion.similarity >= 0.55 || fuzzySuggestion.score >= 55);
+    
+    return {
+      originalName: name,
+      action: hasStrongMatch ? 'link_alias' : 'register',
+      resolvedName: hasStrongMatch ? fuzzySuggestion.member.name : name,
+      suggestedMember: fuzzySuggestion ? fuzzySuggestion.member : null,
+      similarity: fuzzySuggestion ? (fuzzySuggestion.similarity || (fuzzySuggestion.score / 100)) : 0
+    };
+  });
 
   updateState({
     unregisteredResolutionModal: {
       unregisteredNames: modalNames,
       onResolve: (resolvedNames) => {
-        const mList = getMembers();
+        let currentMembers = getMembers();
         const auditTrails = getAuditTrails();
         const adminName = ADMIN_NAMES[state.currentAdminEmail] || 'Unknown Admin';
-        let maxMemberNum = mList.reduce((max, m) => m.member_number > max ? m.member_number : max, 0);
+        let maxMemberNum = currentMembers.reduce((max, m) => m.member_number > max ? m.member_number : max, 0);
 
         resolvedNames.forEach(item => {
-          const cleaned = cleanName(item.resolvedName);
-          if (item.action === 'register' || item.action === 'rename') {
-            const isAlreadyInDb = mList.some(m => getNormalizedName(m.name) === getNormalizedName(cleaned));
+          if (item.action === 'link_alias' && item.suggestedMember) {
+            // Add as alias to the suggested registered member
+            addMemberAlias(item.suggestedMember.id, item.originalName);
+            
+            auditTrails.unshift({
+              id: `audit-${generateUUID()}`,
+              admin_email: state.currentAdminEmail,
+              admin_name: adminName,
+              action: 'UPDATE_MEMBER',
+              entity_type: 'MEMBER',
+              description: `Linked alias "${item.originalName}" to member ${item.suggestedMember.name} (#${item.suggestedMember.member_number})`,
+              timestamp: new Date().toISOString()
+            });
+          } else if (item.action === 'register' || item.action === 'rename') {
+            const cleaned = cleanName(item.resolvedName);
+            const isAlreadyInDb = currentMembers.some(m => getNormalizedName(m.name) === getNormalizedName(cleaned));
             if (!isAlreadyInDb) {
               maxMemberNum++;
-              mList.push({
+              currentMembers.push({
                 id: generateUUID(),
                 name: cleaned,
                 display_name: `@${cleaned.replace(/\s+/g, '')}`,
@@ -2488,6 +3288,7 @@ function triggerUnregisteredResolution(text, onComplete) {
                 total_active_days: 0,
                 last_active_date: null,
                 consecutive_inactive_days: 0,
+                aliases: item.action === 'rename' && item.originalName !== cleaned ? [item.originalName] : [],
                 notes: '',
                 created_at: new Date().toISOString(),
                 updated_at: new Date().toISOString()
@@ -2499,17 +3300,17 @@ function triggerUnregisteredResolution(text, onComplete) {
                 admin_name: adminName,
                 action: 'ADD_MEMBER',
                 entity_type: 'MEMBER',
-                description: `Registered resolved unregistered member: ${cleaned} (No. ${maxMemberNum})`,
+                description: `Registered resolved member: ${cleaned} (No. ${maxMemberNum})`,
                 timestamp: new Date().toISOString()
               });
             }
           }
         });
 
-        saveMembers(mList);
+        saveMembers(currentMembers);
         saveAuditTrails(auditTrails);
 
-        showToast('নতুন মেম্বারদের সফলভাবে রেজিস্টার করা হয়েছে!', 'success');
+        showToast('মেম্বারদের রেজোলিউশন সফলভাবে সম্পন্ন হয়েছে!', 'success');
 
         // Map mentions in the daily submission activity list
         const mentionRegex = /@([^\n\r📅📆✅👇🅾️➤〰️💤⚠️\r\n\t(@]+)/g;
@@ -2523,6 +3324,8 @@ function triggerUnregisteredResolution(text, onComplete) {
           if (item) {
             if (item.action === 'skip') {
               return '';
+            } else if (item.action === 'link_alias' && item.suggestedMember) {
+              return `@${item.suggestedMember.name}`;
             } else {
               return `@${item.resolvedName}`;
             }
@@ -4501,6 +5304,322 @@ function bindLoginEvents() {
         });
       }
     };
+  }
+
+  // GLOBAL: Open Member Profile from any view
+  document.querySelectorAll('[data-open-profile]').forEach(el => {
+    el.onclick = (e) => {
+      e.stopPropagation();
+      const mId = el.getAttribute('data-open-profile');
+      if (mId) {
+        openMemberProfile(mId);
+      }
+    };
+  });
+
+  // MODAL EVENTS: MEMBER PROFILE MODAL
+  if (state.memberProfileModal) {
+    const profileMemberId = state.memberProfileModal.memberId;
+
+    // Close Button
+    const closeProfileBtn = document.getElementById('close-member-profile-modal-btn');
+    if (closeProfileBtn) {
+      closeProfileBtn.onclick = () => {
+        updateState({ memberProfileModal: null });
+      };
+    }
+
+    // Close on clicking backdrop overlay
+    const profileOverlay = document.getElementById('member-profile-modal-overlay');
+    if (profileOverlay) {
+      profileOverlay.onclick = (e) => {
+        if (e.target === profileOverlay) {
+          updateState({ memberProfileModal: null });
+        }
+      };
+    }
+
+    // Tab Navigation
+    document.querySelectorAll('[data-profile-tab]').forEach(btn => {
+      btn.onclick = (e) => {
+        const tab = e.currentTarget.getAttribute('data-profile-tab');
+        updateState({
+          memberProfileModal: {
+            ...state.memberProfileModal,
+            currentTab: tab
+          }
+        });
+      };
+    });
+
+    // Download PNG from Profile Modal
+    const modalDownloadPngBtn = document.getElementById('modal-download-png-btn');
+    if (modalDownloadPngBtn) {
+      modalDownloadPngBtn.onclick = () => {
+        downloadMemberReportCardPng(profileMemberId);
+      };
+    }
+
+    // Toggle Freeze Button in Profile Overview
+    document.querySelectorAll('[data-toggle-freeze-profile]').forEach(btn => {
+      btn.onclick = (e) => {
+        const memberId = e.currentTarget.getAttribute('data-toggle-freeze-profile');
+        const members = getMembers();
+        const mIdx = members.findIndex(m => m.id === memberId);
+        if (mIdx !== -1) {
+          const isCurrentlyFrozen = members[mIdx].status === 'frozen';
+          const newStatus = isCurrentlyFrozen ? 'active' : 'frozen';
+          members[mIdx].status = newStatus;
+          if (newStatus === 'frozen') {
+            members[mIdx].consecutive_inactive_days = 0;
+          }
+          members[mIdx].updated_at = new Date().toISOString();
+          saveMembers(members);
+
+          const auditTrails = getAuditTrails();
+          const adminName = ADMIN_NAMES[state.currentAdminEmail] || 'Admin';
+          auditTrails.unshift({
+            id: `audit-${Date.now()}`,
+            admin_email: state.currentAdminEmail,
+            admin_name: adminName,
+            action: isCurrentlyFrozen ? 'UNFREEZE_MEMBER' : 'FREEZE_MEMBER',
+            entity_type: 'MEMBER',
+            description: `${isCurrentlyFrozen ? 'Unfroze' : 'Froze'} member activity: ${members[mIdx].name}`,
+            timestamp: new Date().toISOString()
+          });
+          saveAuditTrails(auditTrails);
+
+          showToast(`${members[mIdx].name} ${isCurrentlyFrozen ? 'কে Unfreeze করা হয়েছে।' : 'কে Freeze করা হয়েছে।'}`, 'success');
+          loadStateFromStorage();
+          updateState({});
+        }
+      };
+    });
+
+    // Add Manual Submission Log (History Tab)
+    const saveLogBtn = document.getElementById('profile-save-log-btn');
+    if (saveLogBtn) {
+      saveLogBtn.onclick = () => {
+        const dateInp = document.getElementById('profile-log-date-input');
+        const pointsInp = document.getElementById('profile-log-points-input');
+        const statusSel = document.getElementById('profile-log-status-select');
+
+        const dateStr = dateInp ? dateInp.value : new Date().toISOString().split('T')[0];
+        const points = pointsInp ? parseInt(pointsInp.value, 10) || 10 : 10;
+        const isActive = statusSel ? statusSel.value === 'true' : true;
+
+        addManualMemberLog(profileMemberId, dateStr, points, isActive, state.currentAdminEmail);
+      };
+    }
+
+    // Toggle Log Active/Inactive status
+    document.querySelectorAll('[data-toggle-log-status]').forEach(btn => {
+      btn.onclick = (e) => {
+        const logId = e.currentTarget.getAttribute('data-toggle-log-status');
+        const logs = getActivityLogs();
+        const log = logs.find(l => l.id === logId);
+        if (log) {
+          updateMemberLogStatus(logId, !log.is_active);
+        }
+      };
+    });
+
+    // Delete Log
+    document.querySelectorAll('[data-delete-log]').forEach(btn => {
+      btn.onclick = (e) => {
+        const logId = e.currentTarget.getAttribute('data-delete-log');
+        showConfirm(
+          'আপনি কি সত্যিই এই সাবমিশন লগটি মুছে ফেলতে চান? মেম্বারের পয়েন্ট ও স্ট্রেইক স্বয়ংক্রিয়ভাবে পুনরায় গণনা হবে।',
+          () => {
+            deleteMemberLog(logId);
+          },
+          null,
+          'লগ মুছুন'
+        );
+      };
+    });
+
+    // Save Profile Edit Changes (Edit Tab)
+    const saveDetailsBtn = document.getElementById('profile-save-details-btn');
+    if (saveDetailsBtn) {
+      saveDetailsBtn.onclick = () => {
+        const nameInp = document.getElementById('profile-edit-name-input');
+        const displayInp = document.getElementById('profile-edit-display-input');
+        const notesInp = document.getElementById('profile-edit-notes-input');
+
+        const updates = {};
+        if (nameInp) updates.name = nameInp.value;
+        if (displayInp) updates.display_name = displayInp.value;
+        if (notesInp) updates.notes = notesInp.value;
+
+        if (updateMemberDetails(profileMemberId, updates)) {
+          showToast('মেম্বার প্রোফাইল সফলভাবে আপডেট করা হয়েছে!', 'success');
+        } else {
+          showToast('প্রোফাইল আপডেট করতে সমস্যা হয়েছে।', 'error');
+        }
+      };
+    }
+
+    // Add Alias (Aliases Tab)
+    const addAliasBtn = document.getElementById('profile-add-alias-btn');
+    const aliasInp = document.getElementById('profile-new-alias-input');
+    if (addAliasBtn) {
+      addAliasBtn.onclick = () => {
+        if (aliasInp) {
+          const alias = aliasInp.value.trim();
+          if (!alias) {
+            showToast('দয়া করে Alias লিখুন!', 'error');
+            return;
+          }
+          if (addMemberAlias(profileMemberId, alias)) {
+            showToast(`"${alias}" Alias সফলভাবে যুক্ত করা হয়েছে!`, 'success');
+            aliasInp.value = '';
+          }
+        }
+      };
+    }
+    if (aliasInp) {
+      aliasInp.onkeydown = (e) => {
+        if (e.key === 'Enter') {
+          if (addAliasBtn) addAliasBtn.click();
+        }
+      };
+    }
+
+    // Remove Alias (Aliases Tab)
+    document.querySelectorAll('[data-remove-alias]').forEach(btn => {
+      btn.onclick = (e) => {
+        const alias = e.currentTarget.getAttribute('data-remove-alias');
+        const memberId = e.currentTarget.getAttribute('data-member-id') || profileMemberId;
+        if (removeMemberAlias(memberId, alias)) {
+          showToast(`"${alias}" Alias মুছে ফেলা হয়েছে!`, 'info');
+        }
+      };
+    });
+  }
+
+  // Bind Global Activity Detail Modal Trigger (from History, Overview, or Reports)
+  document.querySelectorAll('[data-open-activity-detail]').forEach(elem => {
+    elem.onclick = (e) => {
+      e.stopPropagation();
+      const logId = e.currentTarget.getAttribute('data-open-activity-detail');
+      const memberId = e.currentTarget.getAttribute('data-member-id');
+      if (logId) {
+        openActivityDetail(logId, memberId);
+      }
+    };
+  });
+
+  // Bind Activity Detail Modal Controls
+  if (state.activityDetailModal) {
+    const closeBtn = document.getElementById('close-activity-detail-modal-btn');
+    const closeSecBtn = document.getElementById('close-activity-detail-modal-secondary-btn');
+    const overlay = document.getElementById('activity-detail-modal-overlay');
+
+    const handleClose = () => {
+      updateState({ activityDetailModal: null });
+    };
+
+    if (closeBtn) closeBtn.onclick = handleClose;
+    if (closeSecBtn) closeSecBtn.onclick = handleClose;
+    if (overlay) {
+      overlay.onclick = (e) => {
+        if (e.target === overlay) handleClose();
+      };
+    }
+
+    // Copy Activity ID
+    document.querySelectorAll('[data-copy-activity-id]').forEach(btn => {
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        const id = e.currentTarget.getAttribute('data-copy-activity-id');
+        if (id && navigator.clipboard) {
+          navigator.clipboard.writeText(id).then(() => {
+            showToast('Activity ID ক্লিপবোর্ডে কপি করা হয়েছে!', 'success');
+          }).catch(() => {
+            showToast(`ID: ${id}`, 'info');
+          });
+        }
+      };
+    });
+
+    // Start Edit Activity Form
+    document.querySelectorAll('[data-start-edit-activity]').forEach(btn => {
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        updateState({
+          activityDetailModal: {
+            ...state.activityDetailModal,
+            isEditing: true
+          }
+        });
+      };
+    });
+
+    // Cancel Edit Activity
+    document.querySelectorAll('[data-cancel-activity-edit]').forEach(btn => {
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        updateState({
+          activityDetailModal: {
+            ...state.activityDetailModal,
+            isEditing: false
+          }
+        });
+      };
+    });
+
+    // Save Edit Activity Changes
+    document.querySelectorAll('[data-save-activity-edit]').forEach(btn => {
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        const logId = e.currentTarget.getAttribute('data-save-activity-edit');
+        const dateInp = document.getElementById('edit-activity-date-input');
+        const statusSel = document.getElementById('edit-activity-status-select');
+        const pointsInp = document.getElementById('edit-activity-points-input');
+        const sourceSel = document.getElementById('edit-activity-source-select');
+
+        const updates = {
+          activity_date: dateInp ? dateInp.value : undefined,
+          is_active: statusSel ? (statusSel.value === 'true') : true,
+          points_earned: pointsInp ? parseInt(pointsInp.value, 10) || 0 : 10,
+          source: sourceSel ? sourceSel.value : 'Daily Submission'
+        };
+
+        if (updateActivityLog(logId, updates)) {
+          showToast('অ্যাক্টিভিটি সফলভাবে আপডেট ও অডিটে রেকর্ড করা হয়েছে!', 'success');
+          updateState({
+            activityDetailModal: {
+              ...state.activityDetailModal,
+              isEditing: false
+            }
+          });
+        } else {
+          showToast('অ্যাক্টিভিটি আপডেট করতে সমস্যা হয়েছে।', 'error');
+        }
+      };
+    });
+
+    // Delete Activity Record
+    document.querySelectorAll('[data-delete-activity-detail]').forEach(btn => {
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        const logId = e.currentTarget.getAttribute('data-delete-activity-detail');
+        showConfirm(
+          'আপনি কি নিশ্চিতভাবে এই অ্যাক্টিভিটি রেকর্ডটি মুছে ফেলতে চান? এটি Audit Log-এ সংরক্ষিত হবে এবং সংশ্লিষ্ট মেম্বারের স্ট্রেইক ও মোট পয়েন্ট পুনরায় হিসাব করা হবে।',
+          () => {
+            if (deleteActivityLog(logId)) {
+              showToast('অ্যাক্টিভিটি মুছে ফেলা হয়েছে এবং অডিটে সংরক্ষিত হয়েছে।', 'info');
+              updateState({ activityDetailModal: null });
+            } else {
+              showToast('অ্যাক্টিভিটি মুছতে সমস্যা হয়েছে।', 'error');
+            }
+          },
+          null,
+          'অ্যাক্টিভিটি মুছুন'
+        );
+      };
+    });
   }
 }
 

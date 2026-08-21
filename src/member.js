@@ -7,11 +7,12 @@ import {
   getActivityLogs, saveActivityLogs, 
   getAuditTrails, saveAuditTrails, 
   getBadges, saveBadges,
-  cleanName, getNormalizedName, 
+  cleanName, getNormalizedName, getUltraNormalizedName,
+  findMatchingMember, findFuzzyMemberSuggestion, calculateNameSimilarity,
   getYesterdayDateStr, getDiffDays, generateUUID 
 } from './database.js';
 import { showToast } from './toast.js';
-import { showAlert } from './modal.js';
+import { showAlert, showConfirm } from './modal.js';
 
 // Add single member
 export function handleAddMember(rawName, notes = '') {
@@ -22,9 +23,14 @@ export function handleAddMember(rawName, notes = '') {
   }
 
   const members = getMembers();
-  const duplicate = members.find(m => getNormalizedName(m.name) === getNormalizedName(cleaned));
+  const duplicate = members.find(m => {
+    const norm = getNormalizedName(cleaned);
+    const ultra = getUltraNormalizedName(cleaned);
+    return getNormalizedName(m.name) === norm || getUltraNormalizedName(m.name) === ultra;
+  });
+
   if (duplicate) {
-    showAlert(`এই নামের অন্য লোক আছে! অনুগ্রহ করে নামের শেষে '1', '2' বা 'A', 'B' কিছু লাগিয়ে দিন (যেমন: ${cleaned} A)`, 'ডুপ্লিকেট মেম্বার');
+    showAlert(`এই নামের মেম্বার (${duplicate.name} - No. ${duplicate.member_number}) ইতিমধ্যে আছে! নামের শেষে '1', '2' বা কিছু পার্থক্য যোগ করুন।`, 'ডুপ্লিকেট মেম্বার');
     return false;
   }
 
@@ -44,6 +50,7 @@ export function handleAddMember(rawName, notes = '') {
     total_active_days: 0,
     last_active_date: null,
     consecutive_inactive_days: 0,
+    aliases: [],
     notes,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString()
@@ -93,7 +100,12 @@ export function handleBulkAddMembers(namesList) {
     const cleaned = cleanName(rawName);
     if (!cleaned) return;
     
-    const duplicate = members.find(m => getNormalizedName(m.name) === getNormalizedName(cleaned));
+    const duplicate = members.find(m => {
+      const norm = getNormalizedName(cleaned);
+      const ultra = getUltraNormalizedName(cleaned);
+      return getNormalizedName(m.name) === norm || getUltraNormalizedName(m.name) === ultra;
+    });
+
     if (duplicate) {
       if (!duplicateNames.includes(cleaned)) {
         duplicateNames.push(cleaned);
@@ -115,6 +127,7 @@ export function handleBulkAddMembers(namesList) {
       total_active_days: 0,
       last_active_date: null,
       consecutive_inactive_days: 0,
+      aliases: [],
       notes: '',
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
@@ -147,131 +160,177 @@ export function handleBulkAddMembers(namesList) {
   return { successCount, duplicateNames, totalAttempted: namesList.length };
 }
 
-// Bulk mention text extractor
+// Bulk mention text extractor with Multi-Tier Matching Engine & Suggestions
 export function parseBulkActivityText(text) {
-  if (!text) return { parsedNames: [], matchedMembers: [], unregisteredNames: [] };
+  if (!text) return { parsedNames: [], matchedMembers: [], unregisteredNames: [], parsedItems: [] };
 
   const parsedNames = [];
-  // Strict regex parser separated into clean isolated algorithm to protect Messenger shifts
+  const rawOccurrences = [];
+  
+  // Regex extracting all mentions with prefixes like 1. @..., 9️⃣1️⃣➤@...
   const regex = /@([^\n\r📅📆✅👇🅾️➤〰️💤⚠️\r\n\t(@]+)/g;
   let match;
   while ((match = regex.exec(text)) !== null) {
     const extracted = match[1].trim();
     if (extracted && extracted.length > 1) {
-      const cleaned = extracted.replace(/^[➤\s]+/, '').trim();
-      if (cleaned && !parsedNames.includes(cleaned)) {
-        parsedNames.push(cleaned);
-      }
-    }
-  }
-
-  // Fallback split manually if regex matched nothing
-  if (parsedNames.length === 0) {
-    const parts = text.split('@');
-    for (let i = 1; i < parts.length; i++) {
-      const part = parts[i];
-      const namePartMatch = part.match(/^([^📅📆✅👇🅾️➤〰️💤⚠️\r\n\t(@]+)/);
-      if (namePartMatch) {
-        const cleaned = namePartMatch[1].trim();
-        if (cleaned && cleaned.length > 1 && !parsedNames.includes(cleaned)) {
-          parsedNames.push(cleaned);
+      const cleanedFinal = cleanName(extracted);
+      if (cleanedFinal && cleanedFinal.length >= 2) {
+        rawOccurrences.push(cleanedFinal);
+        if (!parsedNames.includes(cleanedFinal)) {
+          parsedNames.push(cleanedFinal);
         }
       }
     }
   }
 
+  // Fallback 1: split manually by @ if regex matched nothing
+  if (parsedNames.length === 0 && text.includes('@')) {
+    const parts = text.split('@');
+    for (let i = 1; i < parts.length; i++) {
+      const part = parts[i];
+      const namePartMatch = part.match(/^([^📅📆✅👇🅾️➤〰️💤⚠️\r\n\t(@]+)/);
+      if (namePartMatch) {
+        const cleanedFinal = cleanName(namePartMatch[1]);
+        if (cleanedFinal && cleanedFinal.length >= 2) {
+          rawOccurrences.push(cleanedFinal);
+          if (!parsedNames.includes(cleanedFinal)) {
+            parsedNames.push(cleanedFinal);
+          }
+        }
+      }
+    }
+  }
+
+  // Fallback 2: line-by-line extraction for lists pasted without @ symbols (e.g. "1. Md Shakil Ahmed", "2. Jakaria Hosain")
+  if (parsedNames.length === 0) {
+    const lines = text.split('\n');
+    lines.forEach(line => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+      if (/^(📅|তারিখ|tarikh|date|support|link\s*box|active\s*member|total)/i.test(trimmed)) return;
+      const cleaned = cleanName(trimmed);
+      if (cleaned && cleaned.length >= 2) {
+        rawOccurrences.push(cleaned);
+        if (!parsedNames.includes(cleaned)) {
+          parsedNames.push(cleaned);
+        }
+      }
+    });
+  }
+
   const members = getMembers();
   const matchedMembers = [];
   const unregisteredNames = [];
+  const parsedItems = [];
 
-  parsedNames.forEach(rawName => {
-    const cleaned = cleanName(rawName);
-    const match = members.find(m => {
-      const normMName = getNormalizedName(m.name);
-      const normMDisplayName = getNormalizedName(m.display_name || '');
-      const normCleaned = getNormalizedName(cleaned);
-      return normMName === normCleaned || normMDisplayName === normCleaned;
-    });
+  rawOccurrences.forEach((name, idx) => {
+    const matchResult = findMatchingMember(name, members);
+    let suggestion = null;
 
-    if (match) {
-      if (!matchedMembers.some(m => m.id === match.id)) {
-        matchedMembers.push(match);
+    if (matchResult && matchResult.member) {
+      if (!matchedMembers.some(m => m.id === matchResult.member.id)) {
+        matchedMembers.push(matchResult.member);
       }
+      parsedItems.push({
+        index: idx + 1,
+        rawName: name,
+        cleanedName: cleanName(name),
+        isMatched: true,
+        matchType: matchResult.type,
+        confidence: matchResult.confidence,
+        member: matchResult.member,
+        suggestion: null
+      });
     } else {
-      if (!unregisteredNames.includes(cleaned)) {
-        unregisteredNames.push(cleaned);
+      if (!unregisteredNames.includes(name)) {
+        unregisteredNames.push(name);
       }
+      suggestion = findFuzzyMemberSuggestion(name, members);
+      parsedItems.push({
+        index: idx + 1,
+        rawName: name,
+        cleanedName: cleanName(name),
+        isMatched: false,
+        matchType: 'unregistered',
+        confidence: 'none',
+        member: null,
+        suggestion
+      });
     }
   });
 
-  return { parsedNames, matchedMembers, unregisteredNames };
+  return { parsedNames, matchedMembers, unregisteredNames, parsedItems };
 }
 
-// Helper to analyze duplicate unregistered names from the raw input text
+// Helper to analyze duplicate unregistered names from raw input text
 export function analyzeUnregisteredDuplicates(text) {
   if (!text) return [];
   
-  // 1. Extract ALL parsed raw names (preserving duplicates)
   const allParsedNames = [];
   const regex = /@([^\n\r📅📆✅👇🅾️➤〰️💤⚠️\r\n\t(@]+)/g;
   let match;
   while ((match = regex.exec(text)) !== null) {
     const extracted = match[1].trim();
     if (extracted && extracted.length > 1) {
-      const cleaned = extracted.replace(/^[➤\s]+/, '').trim();
-      const cleanedFinal = cleanName(cleaned);
-      if (cleanedFinal) {
+      const cleanedFinal = cleanName(extracted);
+      if (cleanedFinal && cleanedFinal.length >= 2) {
         allParsedNames.push(cleanedFinal);
       }
     }
   }
   
-  if (allParsedNames.length === 0) {
+  if (allParsedNames.length === 0 && text.includes('@')) {
     const parts = text.split('@');
     for (let i = 1; i < parts.length; i++) {
       const part = parts[i];
       const namePartMatch = part.match(/^([^📅📆✅👇🅾️➤〰️💤⚠️\r\n\t(@]+)/);
       if (namePartMatch) {
-        const cleaned = namePartMatch[1].trim();
-        const cleanedFinal = cleanName(cleaned);
-        if (cleanedFinal && cleanedFinal.length > 1) {
+        const cleanedFinal = cleanName(namePartMatch[1]);
+        if (cleanedFinal && cleanedFinal.length >= 2) {
           allParsedNames.push(cleanedFinal);
         }
       }
     }
   }
+
+  if (allParsedNames.length === 0) {
+    const lines = text.split('\n');
+    lines.forEach(line => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+      if (/^(📅|তারিখ|tarikh|date|support|link\s*box|active\s*member|total)/i.test(trimmed)) return;
+      const cleaned = cleanName(trimmed);
+      if (cleaned && cleaned.length >= 2) {
+        allParsedNames.push(cleaned);
+      }
+    });
+  }
   
-  // 2. Filter out names that are already registered
   const members = getMembers();
   const unregisteredOccurrences = [];
   
   allParsedNames.forEach(rawName => {
-    const cleaned = cleanName(rawName);
-    const isRegistered = members.some(m => {
-      const normMName = getNormalizedName(m.name);
-      const normMDisplayName = getNormalizedName(m.display_name || '');
-      const normCleaned = getNormalizedName(cleaned);
-      return normMName === normCleaned || normMDisplayName === normCleaned;
-    });
-    
-    if (!isRegistered) {
-      unregisteredOccurrences.push(cleaned);
+    const match = findMatchingMember(rawName, members);
+    if (!match) {
+      unregisteredOccurrences.push(rawName);
     }
   });
   
-  // 3. Count frequencies
   const frequencies = {};
   unregisteredOccurrences.forEach(name => {
-    frequencies[name] = (frequencies[name] || 0) + 1;
+    const ultra = getUltraNormalizedName(name);
+    if (!frequencies[ultra]) {
+      frequencies[ultra] = { name, count: 0 };
+    }
+    frequencies[ultra].count++;
   });
   
-  // 4. Extract duplicates (frequency >= 2)
   const duplicates = [];
-  Object.keys(frequencies).forEach(name => {
-    if (frequencies[name] >= 2) {
+  Object.values(frequencies).forEach(item => {
+    if (item.count >= 2) {
       duplicates.push({
-        name,
-        count: frequencies[name]
+        name: item.name,
+        count: item.count
       });
     }
   });
@@ -283,56 +342,61 @@ export function analyzeUnregisteredDuplicates(text) {
 export function analyzeAllDuplicates(text) {
   if (!text) return [];
   
-  // 1. Extract ALL parsed raw names (preserving duplicates)
   const allParsedNames = [];
   const regex = /@([^\n\r📅📆✅👇🅾️➤〰️💤⚠️\r\n\t(@]+)/g;
   let match;
   while ((match = regex.exec(text)) !== null) {
     const extracted = match[1].trim();
     if (extracted && extracted.length > 1) {
-      const cleaned = extracted.replace(/^[➤\s]+/, '').trim();
-      const cleanedFinal = cleanName(cleaned);
-      if (cleanedFinal) {
+      const cleanedFinal = cleanName(extracted);
+      if (cleanedFinal && cleanedFinal.length >= 2) {
         allParsedNames.push(cleanedFinal);
       }
     }
   }
   
-  if (allParsedNames.length === 0) {
+  if (allParsedNames.length === 0 && text.includes('@')) {
     const parts = text.split('@');
     for (let i = 1; i < parts.length; i++) {
       const part = parts[i];
       const namePartMatch = part.match(/^([^📅📆✅👇🅾️➤〰️💤⚠️\r\n\t(@]+)/);
       if (namePartMatch) {
-        const cleaned = namePartMatch[1].trim();
-        const cleanedFinal = cleanName(cleaned);
-        if (cleanedFinal && cleanedFinal.length > 1) {
+        const cleanedFinal = cleanName(namePartMatch[1]);
+        if (cleanedFinal && cleanedFinal.length >= 2) {
           allParsedNames.push(cleanedFinal);
         }
       }
     }
   }
+
+  if (allParsedNames.length === 0) {
+    const lines = text.split('\n');
+    lines.forEach(line => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+      if (/^(📅|তারিখ|tarikh|date|support|link\s*box|active\s*member|total)/i.test(trimmed)) return;
+      const cleaned = cleanName(trimmed);
+      if (cleaned && cleaned.length >= 2) {
+        allParsedNames.push(cleaned);
+      }
+    });
+  }
   
-  // 2. Count frequencies of ALL parsed names using normalized names to group
   const frequencies = {};
   allParsedNames.forEach(name => {
-    const norm = getNormalizedName(name);
-    if (!frequencies[norm]) {
-      frequencies[norm] = {
-        originalName: name,
-        count: 0
-      };
+    const ultra = getUltraNormalizedName(name);
+    if (!frequencies[ultra]) {
+      frequencies[ultra] = { name, count: 0 };
     }
-    frequencies[norm].count++;
+    frequencies[ultra].count++;
   });
   
-  // 3. Extract duplicates (frequency >= 2)
   const duplicates = [];
-  Object.keys(frequencies).forEach(norm => {
-    if (frequencies[norm].count >= 2) {
+  Object.values(frequencies).forEach(item => {
+    if (item.count >= 2) {
       duplicates.push({
-        name: frequencies[norm].originalName,
-        count: frequencies[norm].count
+        name: item.name,
+        count: item.count
       });
     }
   });
@@ -341,34 +405,8 @@ export function analyzeAllDuplicates(text) {
 }
 
 // ----------------------------------------------------
-// SUB-FUNCTIONS FOR MEMBER VALUE RECALCULATIONS (Point 6)
+// SINGLE SOURCE OF TRUTH: RECALCULATE ALL STATS FROM LOGS
 // ----------------------------------------------------
-
-export function calculatePoints(member, isActive) {
-  return isActive ? member.total_points + CONFIG.POINTS.DAILY_ACTIVITY : member.total_points;
-}
-
-export function calculateStreak(member, isActive, dateStr, yesterdayStr) {
-  if (!isActive) {
-    let inactiveDays = member.consecutive_inactive_days;
-    if (member.last_active_date) {
-      inactiveDays = getDiffDays(dateStr, member.last_active_date);
-    } else {
-      inactiveDays += 1;
-    }
-    // If consecutive inactive days are strictly greater than 1, reset streak to zero
-    return inactiveDays > 1 ? 0 : member.current_streak;
-  }
-
-  // Active state
-  if (member.last_active_date === yesterdayStr) {
-    return member.current_streak + 1;
-  } else if (member.last_active_date === dateStr) {
-    return member.current_streak; // Same day, retain current streak
-  } else {
-    return 1; // Gap detected, restart at 1
-  }
-}
 
 export function calculateLevel(totalPoints) {
   if (totalPoints >= CONFIG.LEVEL_POINTS.DIAMOND) return CONFIG.LEVELS.DIAMOND;
@@ -378,28 +416,12 @@ export function calculateLevel(totalPoints) {
   return CONFIG.LEVELS.BRONZE;
 }
 
-export function calculateStatus(member, isActive, dateStr) {
-  if (member && member.status === 'frozen') return 'frozen';
-  if (isActive) return 'active';
-
-  let inactiveDays = member.consecutive_inactive_days;
-  if (member.last_active_date) {
-    inactiveDays = getDiffDays(dateStr, member.last_active_date);
-  } else {
-    inactiveDays += 1;
-  }
-
-  if (inactiveDays >= 12) return 'inactive';
-  if (inactiveDays >= 7) return 'warning';
-  return 'active';
-}
-
-export function checkAndAssignBadges(member, currentStreak, totalPoints, badges) {
+export function checkAndAssignBadges(member, longestStreak, totalPoints, badges) {
   const newBadges = [...badges];
   let updated = false;
 
   // Streak Badges
-  if (currentStreak === 3 && !newBadges.some(b => b.member_id === member.id && b.badge_type === 'streak_3')) {
+  if (longestStreak >= 3 && !newBadges.some(b => b.member_id === member.id && b.badge_type === 'streak_3')) {
     newBadges.push({
       id: `badge-${member.id}-streak3-${Date.now()}`,
       member_id: member.id,
@@ -409,7 +431,7 @@ export function checkAndAssignBadges(member, currentStreak, totalPoints, badges)
     });
     updated = true;
   }
-  if (currentStreak === 7 && !newBadges.some(b => b.member_id === member.id && b.badge_type === 'streak_7')) {
+  if (longestStreak >= 7 && !newBadges.some(b => b.member_id === member.id && b.badge_type === 'streak_7')) {
     newBadges.push({
       id: `badge-${member.id}-streak7-${Date.now()}`,
       member_id: member.id,
@@ -419,7 +441,7 @@ export function checkAndAssignBadges(member, currentStreak, totalPoints, badges)
     });
     updated = true;
   }
-  if (currentStreak === 15 && !newBadges.some(b => b.member_id === member.id && b.badge_type === 'streak_15')) {
+  if (longestStreak >= 15 && !newBadges.some(b => b.member_id === member.id && b.badge_type === 'streak_15')) {
     newBadges.push({
       id: `badge-${member.id}-streak15-${Date.now()}`,
       member_id: member.id,
@@ -455,22 +477,128 @@ export function checkAndAssignBadges(member, currentStreak, totalPoints, badges)
   return { badges: newBadges, updated };
 }
 
+// Master Recalculation Engine — derives 100% of member stats from activity logs
+export function recalculateAllMemberStatsFromLogs(explicitLogs = null, membersList = null, badgesList = null) {
+  const logs = explicitLogs || getActivityLogs();
+  const members = membersList || getMembers();
+  let dynamicBadges = badgesList ? [...badgesList] : [...getBadges()];
+
+  // Collect all distinct submission dates across the system, ordered chronologically
+  const submissionDatesSet = new Set();
+  logs.forEach(l => {
+    if (l.activity_date) {
+      submissionDatesSet.add(l.activity_date);
+    }
+  });
+
+  const allSubmissionDates = Array.from(submissionDatesSet).sort();
+  const latestTrackedDate = allSubmissionDates.length > 0 ? allSubmissionDates[allSubmissionDates.length - 1] : null;
+
+  const updatedMembers = members.map(member => {
+    const memberLogs = logs.filter(l => l.member_id === member.id);
+    const activeLogs = memberLogs.filter(l => l.is_active === true);
+    
+    // Set of active dates for this member
+    const activeDates = new Set(activeLogs.map(l => l.activity_date));
+    const sortedActiveDates = Array.from(activeDates).sort();
+
+    const totalActiveDays = activeDates.size;
+    const totalPoints = activeLogs.reduce((sum, l) => sum + (l.points_earned !== undefined ? l.points_earned : CONFIG.POINTS.DAILY_ACTIVITY), 0);
+    const level = calculateLevel(totalPoints);
+    const lastActiveDate = sortedActiveDates.length > 0 ? sortedActiveDates[sortedActiveDates.length - 1] : null;
+
+    // Calculate Longest Streak
+    let longestStreak = 0;
+    let currentStreakRun = 0;
+    allSubmissionDates.forEach(date => {
+      if (activeDates.has(date)) {
+        currentStreakRun++;
+        if (currentStreakRun > longestStreak) {
+          longestStreak = currentStreakRun;
+        }
+      } else {
+        currentStreakRun = 0;
+      }
+    });
+
+    // Calculate Current Streak (working backwards from the latest submission date)
+    let currentStreak = 0;
+    if (latestTrackedDate && activeDates.has(latestTrackedDate)) {
+      for (let i = allSubmissionDates.length - 1; i >= 0; i--) {
+        const d = allSubmissionDates[i];
+        if (activeDates.has(d)) {
+          currentStreak++;
+        } else {
+          break;
+        }
+      }
+    } else {
+      currentStreak = 0;
+    }
+
+    // Calculate Inactivity Counter
+    let consecutiveInactiveDays = 0;
+    if (allSubmissionDates.length === 0) {
+      consecutiveInactiveDays = 0;
+    } else if (!lastActiveDate) {
+      if (member.created_at) {
+        const joinDate = member.created_at.split('T')[0];
+        const datesSinceJoined = allSubmissionDates.filter(d => d >= joinDate);
+        consecutiveInactiveDays = datesSinceJoined.length;
+      } else {
+        consecutiveInactiveDays = allSubmissionDates.length;
+      }
+    } else if (lastActiveDate === latestTrackedDate) {
+      consecutiveInactiveDays = 0;
+    } else {
+      // Days between latest submission and last active date
+      consecutiveInactiveDays = getDiffDays(latestTrackedDate, lastActiveDate);
+    }
+
+    // Determine status: activity on latest tracked date always ensures active status
+    let status = member.status;
+    if (consecutiveInactiveDays === 0) {
+      status = 'active';
+    } else if (status === 'frozen') {
+      // Retain frozen status if still inactive
+    } else if (consecutiveInactiveDays >= 12) {
+      status = 'inactive';
+    } else if (consecutiveInactiveDays >= 7) {
+      status = 'warning';
+    } else {
+      status = 'active';
+    }
+
+    // Assign badges
+    const badgeResult = checkAndAssignBadges(member, longestStreak, totalPoints, dynamicBadges);
+    if (badgeResult.updated) {
+      dynamicBadges = badgeResult.badges;
+    }
+
+    return {
+      ...member,
+      total_points: totalPoints,
+      total_active_days: totalActiveDays,
+      current_streak: currentStreak,
+      longest_streak: Math.max(member.longest_streak || 0, longestStreak),
+      last_active_date: lastActiveDate,
+      consecutive_inactive_days: consecutiveInactiveDays,
+      status,
+      level,
+      updated_at: new Date().toISOString()
+    };
+  });
+
+  saveMembers(updatedMembers);
+  saveBadges(dynamicBadges);
+
+  return { members: updatedMembers, badges: dynamicBadges };
+}
+
 // Save Daily Submissions
 export function submitBulkActivity(dateStr, activeMemberIds) {
   const members = getMembers();
-  const logs = getActivityLogs();
-  
-  // Prevent duplicate submissions on the same date
-  const duplicateLog = logs.find(l => l.activity_date === dateStr && l.is_active);
-  if (duplicateLog) {
-    showAlert(`এই তারিখে (${dateStr}) ইতিমধ্যে এক্টিভিটি লিস্ট সাবমিট করা হয়েছে! একই তারিখে একাধিক লিস্ট সাবমিট করা যাবে না।`, 'ডুপ্লিকেট তারিখ');
-    return;
-  }
-
-  const badges = getBadges();
-  const auditTrails = getAuditTrails();
-  const state = getState();
-  const adminName = ADMIN_NAMES[state.currentAdminEmail] || 'Unknown Admin';
+  let logs = getActivityLogs();
 
   // Save rollback snapshot
   const snapshot = {
@@ -478,82 +606,35 @@ export function submitBulkActivity(dateStr, activeMemberIds) {
     submissionDate: dateStr,
     membersState: JSON.parse(JSON.stringify(members)),
     logsState: JSON.parse(JSON.stringify(logs)),
-    badgesState: JSON.parse(JSON.stringify(badges))
+    badgesState: JSON.parse(JSON.stringify(getBadges()))
   };
   localStorage.setItem('support_linkbox_last_submission_snapshot', JSON.stringify(snapshot));
 
-  const yesterdayStr = getYesterdayDateStr(dateStr);
-  let loggedCount = 0;
-  let dynamicBadgesList = [...badges];
+  const state = getState();
+  const adminName = ADMIN_NAMES[state.currentAdminEmail] || 'Unknown Admin';
+  const auditTrails = getAuditTrails();
 
-  const updatedMembers = members.map(member => {
-    // Keep frozen members exactly as they are unless they have been reactivated and matched as active
-    const isActive = activeMemberIds.includes(member.id);
-    if (member.status === 'frozen' && !isActive) {
-      return member;
-    }
+  // Filter out any existing logs for this exact date to replace them cleanly
+  logs = logs.filter(l => l.activity_date !== dateStr);
 
-    if (isActive) {
-      logs.push({
-        id: `log-${member.id}-${dateStr}-${Date.now()}`,
-        member_id: member.id,
-        activity_date: dateStr,
-        is_active: true,
-        points_earned: CONFIG.POINTS.DAILY_ACTIVITY,
-        submitted_by: state.currentAdminEmail,
-        created_at: new Date().toISOString()
-      });
-      loggedCount++;
-
-      const newPoints = calculatePoints(member, true);
-      const newStreak = calculateStreak(member, true, dateStr, yesterdayStr);
-      const longestStreak = Math.max(member.longest_streak, newStreak);
-      const totalActiveDays = member.total_active_days + 1;
-      const level = calculateLevel(newPoints);
-      const status = 'active';
-
-      // Assign badges
-      const badgeResult = checkAndAssignBadges(member, newStreak, newPoints, dynamicBadgesList);
-      if (badgeResult.updated) {
-        dynamicBadgesList = badgeResult.badges;
-      }
-
-      return {
-        ...member,
-        total_points: newPoints,
-        current_streak: newStreak,
-        longest_streak: longestStreak,
-        total_active_days: totalActiveDays,
-        last_active_date: dateStr,
-        consecutive_inactive_days: 0,
-        status,
-        level,
-        updated_at: new Date().toISOString()
-      };
-    } else {
-      let inactiveDays = member.consecutive_inactive_days;
-      if (member.last_active_date) {
-        inactiveDays = getDiffDays(dateStr, member.last_active_date);
-      } else {
-        inactiveDays += 1;
-      }
-
-      const newStreak = calculateStreak(member, false, dateStr, yesterdayStr);
-      const status = calculateStatus(member, false, dateStr);
-
-      return {
-        ...member,
-        current_streak: newStreak,
-        consecutive_inactive_days: inactiveDays,
-        status,
-        updated_at: new Date().toISOString()
-      };
-    }
+  // Add new activity logs for all active members
+  activeMemberIds.forEach(id => {
+    logs.push({
+      id: `log-${id}-${dateStr}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      member_id: id,
+      activity_date: dateStr,
+      is_active: true,
+      points_earned: CONFIG.POINTS.DAILY_ACTIVITY,
+      submitted_by: state.currentAdminEmail,
+      created_at: new Date().toISOString()
+    });
   });
 
-  saveMembers(updatedMembers);
+  // Save updated logs
   saveActivityLogs(logs);
-  saveBadges(dynamicBadgesList);
+
+  // Recalculate all member stats from logs
+  const { members: updatedMembers } = recalculateAllMemberStatsFromLogs(logs, members);
 
   auditTrails.unshift({
     id: `audit-${generateUUID()}`,
@@ -571,16 +652,265 @@ export function submitBulkActivity(dateStr, activeMemberIds) {
     auditTrails: getAuditTrails(),
     bulkInputText: '',
     uncheckedUnregisteredNames: [],
+    bulkEditSession: null,
     lastSubmissionSnapshot: snapshot
   });
-  showToast('মেম্বার অ্যাক্টিভিটি এবং ডেইলি লিংক সফলভাবে সেভ করা হয়েছে!', 'success');
+
+  showToast('মেম্বার অ্যাক্টিভিটি সফলভাবে সেভ ও ক্যালকুলেট করা হয়েছে!', 'success');
+}
+
+// Manual Activity Log Operations for Admin
+export function addManualMemberLog(memberId, activityDate, points = 10, isActive = true) {
+  let logs = getActivityLogs();
+  // Remove existing log for this member on this date if any
+  logs = logs.filter(l => !(l.member_id === memberId && l.activity_date === activityDate));
+
+  const state = getState();
+  const currentEmail = state.currentAdminEmail || 'shihab@linkbox.com';
+  const adminName = ADMIN_NAMES[currentEmail] || currentEmail;
+  const newLogId = `manual-${memberId.slice(0, 6)}-${activityDate}-${Date.now().toString(36)}`;
+
+  logs.push({
+    id: newLogId,
+    member_id: memberId,
+    activity_date: activityDate,
+    is_active: isActive,
+    points_earned: isActive ? (points !== undefined ? points : CONFIG.POINTS.DAILY_ACTIVITY) : 0,
+    submitted_by: currentEmail,
+    source: 'Manual Entry',
+    created_at: new Date().toISOString()
+  });
+
+  saveActivityLogs(logs);
+  recalculateAllMemberStatsFromLogs(logs);
+
+  const members = getMembers();
+  const member = members.find(m => m.id === memberId);
+  const memberName = member ? member.name : memberId;
+
+  const auditTrails = getAuditTrails();
+  auditTrails.unshift({
+    id: `audit-${generateUUID()}`,
+    admin_email: currentEmail,
+    admin_name: adminName,
+    action: 'ADD_ACTIVITY',
+    entity_type: 'ACTIVITY',
+    description: `Added manual activity log (${activityDate}) for ${memberName}. Status: ${isActive ? 'Active' : 'Inactive'}, Points: ${isActive ? points : 0}`,
+    timestamp: new Date().toISOString()
+  });
+  saveAuditTrails(auditTrails);
+
+  updateState({
+    members: getMembers(),
+    auditTrails: getAuditTrails()
+  });
+  showToast(`ম্যানুয়াল অ্যাক্টিভিটি লগ (${activityDate}) সেভ করা হয়েছে!`, 'success');
+  return newLogId;
+}
+
+export function updateMemberLogStatus(logId, isActive) {
+  let logs = getActivityLogs();
+  const logIdx = logs.findIndex(l => l.id === logId);
+  if (logIdx !== -1) {
+    const oldStatus = logs[logIdx].is_active;
+    logs[logIdx].is_active = isActive;
+    logs[logIdx].points_earned = isActive ? CONFIG.POINTS.DAILY_ACTIVITY : 0;
+    logs[logIdx].updated_at = new Date().toISOString();
+
+    saveActivityLogs(logs);
+    recalculateAllMemberStatsFromLogs(logs);
+
+    const state = getState();
+    const currentEmail = state.currentAdminEmail || 'shihab@linkbox.com';
+    const adminName = ADMIN_NAMES[currentEmail] || currentEmail;
+    const member = getMembers().find(m => m.id === logs[logIdx].member_id);
+    const memberName = member ? member.name : logs[logIdx].member_id;
+
+    const auditTrails = getAuditTrails();
+    auditTrails.unshift({
+      id: `audit-${generateUUID()}`,
+      admin_email: currentEmail,
+      admin_name: adminName,
+      action: 'EDIT_ACTIVITY',
+      entity_type: 'ACTIVITY',
+      description: `Toggled activity status for ${memberName} (${logs[logIdx].activity_date}): ${oldStatus ? 'Active' : 'Inactive'} ➔ ${isActive ? 'Active' : 'Inactive'}`,
+      timestamp: new Date().toISOString()
+    });
+    saveAuditTrails(auditTrails);
+
+    updateState({
+      members: getMembers(),
+      auditTrails: getAuditTrails()
+    });
+    showToast('লগ স্ট্যাটাস আপডেট করা হয়েছে এবং অডিট লগে রেকর্ড হয়েছে!', 'success');
+  }
+}
+
+export function updateActivityLog(logId, updates) {
+  let logs = getActivityLogs();
+  const logIdx = logs.findIndex(l => l.id === logId);
+  if (logIdx === -1) return false;
+
+  const oldLog = { ...logs[logIdx] };
+  const members = getMembers();
+  const member = members.find(m => m.id === oldLog.member_id);
+  const memberName = member ? member.name : oldLog.member_id;
+
+  const nextDate = updates.activity_date !== undefined ? updates.activity_date : oldLog.activity_date;
+  const nextIsActive = updates.is_active !== undefined ? Boolean(updates.is_active) : oldLog.is_active;
+  const nextPoints = updates.points_earned !== undefined ? Number(updates.points_earned) : (nextIsActive ? CONFIG.POINTS.DAILY_ACTIVITY : 0);
+  const nextSource = updates.source !== undefined ? updates.source : (oldLog.source || 'Daily Submission');
+
+  logs[logIdx] = {
+    ...oldLog,
+    activity_date: nextDate,
+    is_active: nextIsActive,
+    points_earned: nextPoints,
+    source: nextSource,
+    updated_at: new Date().toISOString()
+  };
+
+  saveActivityLogs(logs);
+  recalculateAllMemberStatsFromLogs(logs);
+
+  const state = getState();
+  const currentEmail = state.currentAdminEmail || 'shihab@linkbox.com';
+  const adminName = ADMIN_NAMES[currentEmail] || currentEmail;
+
+  const changes = [];
+  if (oldLog.activity_date !== nextDate) changes.push(`Date: ${oldLog.activity_date} ➔ ${nextDate}`);
+  if (oldLog.is_active !== nextIsActive) changes.push(`Status: ${oldLog.is_active ? 'Active' : 'Inactive'} ➔ ${nextIsActive ? 'Active' : 'Inactive'}`);
+  if (oldLog.points_earned !== nextPoints) changes.push(`Points: ${oldLog.points_earned} ➔ ${nextPoints}`);
+  if (oldLog.source !== nextSource) changes.push(`Source: ${oldLog.source || 'Daily Submission'} ➔ ${nextSource}`);
+
+  const auditTrails = getAuditTrails();
+  auditTrails.unshift({
+    id: `audit-${generateUUID()}`,
+    admin_email: currentEmail,
+    admin_name: adminName,
+    action: 'EDIT_ACTIVITY',
+    entity_type: 'ACTIVITY',
+    description: `Edited activity record of ${oldLog.activity_date} for ${memberName}. ${changes.join(', ') || 'Updated log details.'}`,
+    timestamp: new Date().toISOString()
+  });
+  saveAuditTrails(auditTrails);
+
+  updateState({
+    members: getMembers(),
+    auditTrails: getAuditTrails()
+  });
+
+  showToast('অ্যাক্টিভিটি সফলভাবে আপডেট হয়েছে এবং অডিট লগে রেকর্ড হয়েছে!', 'success');
+  return true;
+}
+
+export function deleteMemberLog(logId) {
+  let logs = getActivityLogs();
+  const logToDelete = logs.find(l => l.id === logId);
+  if (!logToDelete) return false;
+
+  const members = getMembers();
+  const member = members.find(m => m.id === logToDelete.member_id);
+  const memberName = member ? member.name : logToDelete.member_id;
+
+  logs = logs.filter(l => l.id !== logId);
+
+  saveActivityLogs(logs);
+  recalculateAllMemberStatsFromLogs(logs);
+
+  const state = getState();
+  const currentEmail = state.currentAdminEmail || 'shihab@linkbox.com';
+  const adminName = ADMIN_NAMES[currentEmail] || currentEmail;
+
+  const auditTrails = getAuditTrails();
+  auditTrails.unshift({
+    id: `audit-${generateUUID()}`,
+    admin_email: currentEmail,
+    admin_name: adminName,
+    action: 'DELETE_ACTIVITY',
+    entity_type: 'ACTIVITY',
+    description: `Deleted activity log for ${memberName} (Date: ${logToDelete.activity_date}, ID: ${logToDelete.id})`,
+    timestamp: new Date().toISOString()
+  });
+  saveAuditTrails(auditTrails);
+
+  updateState({
+    members: getMembers(),
+    auditTrails: getAuditTrails()
+  });
+  showToast('অ্যাক্টিভিটি লগ মুছে ফেলা হয়েছে এবং অডিট লগে রেকর্ড হয়েছে!', 'info');
+  return true;
+}
+
+export const deleteActivityLog = deleteMemberLog;
+
+export function updateMemberDetails(memberId, updates) {
+  const members = getMembers();
+  const idx = members.findIndex(m => m.id === memberId);
+  if (idx === -1) return false;
+
+  const current = members[idx];
+  const nextName = updates.name !== undefined ? cleanName(updates.name) : current.name;
+  const nextDisplayName = updates.display_name !== undefined ? updates.display_name.trim() : current.display_name;
+  const nextNotes = updates.notes !== undefined ? updates.notes.trim() : current.notes;
+  const nextStatus = updates.status !== undefined ? updates.status : current.status;
+  const nextAliases = Array.isArray(updates.aliases) ? updates.aliases : (current.aliases || []);
+
+  members[idx] = {
+    ...current,
+    name: nextName || current.name,
+    display_name: nextDisplayName || current.display_name,
+    notes: nextNotes,
+    status: nextStatus,
+    aliases: nextAliases,
+    updated_at: new Date().toISOString()
+  };
+
+  saveMembers(members);
+  
+  // Recalculate stats with the updated member data
+  const logs = getActivityLogs();
+  recalculateAllMemberStatsFromLogs(logs, members);
+
+  updateState({
+    members: getMembers()
+  });
+
+  return true;
+}
+
+export function addMemberAlias(memberId, alias) {
+  if (!alias || !alias.trim()) return false;
+  const cleaned = cleanName(alias);
+  if (!cleaned) return false;
+
+  const members = getMembers();
+  const member = members.find(m => m.id === memberId);
+  if (!member) return false;
+
+  const aliases = Array.isArray(member.aliases) ? [...member.aliases] : [];
+  const normCleaned = getNormalizedName(cleaned);
+  if (!aliases.some(a => getNormalizedName(a) === normCleaned)) {
+    aliases.push(cleaned);
+    return updateMemberDetails(memberId, { aliases });
+  }
+  return true;
+}
+
+export function removeMemberAlias(memberId, alias) {
+  const members = getMembers();
+  const member = members.find(m => m.id === memberId);
+  if (!member || !Array.isArray(member.aliases)) return false;
+
+  const normTarget = getNormalizedName(alias);
+  const aliases = member.aliases.filter(a => getNormalizedName(a) !== normTarget);
+  return updateMemberDetails(memberId, { aliases });
 }
 
 // Helper to calculate statistics for Pending Submission Preview
 export function calculateSubmissionStats(rawText, resolvedText, resolvedDuplicates = []) {
   const members = getMembers();
   
-  // 1. Calculate duplicates and skipped from resolvedDuplicates
   let duplicateCount = 0;
   let skippedCount = 0;
   
@@ -594,17 +924,13 @@ export function calculateSubmissionStats(rawText, resolvedText, resolvedDuplicat
       });
     });
   } else {
-    // If we didn't go through duplicate resolution modal (i.e. no duplicates),
-    // let's run the analyzer just in case
     const dups = analyzeAllDuplicates(rawText);
     duplicateCount = dups.length;
   }
 
-  // 2. Parse the resolved text (or raw text if no duplicates)
   const textToParse = resolvedText || rawText;
   const { parsedNames, matchedMembers, unregisteredNames } = parseBulkActivityText(textToParse);
   
-  // 3. Count categories
   let registeredCount = 0;
   let frozenCount = 0;
   let aliasCount = 0;
@@ -616,7 +942,6 @@ export function calculateSubmissionStats(rawText, resolvedText, resolvedDuplicat
       registeredCount++;
     }
     
-    // Check if matched on alias (display_name matches but name doesn't)
     const normName = getNormalizedName(m.name);
     const normDisp = getNormalizedName(m.display_name || '');
     parsedNames.forEach(pn => {
@@ -627,14 +952,9 @@ export function calculateSubmissionStats(rawText, resolvedText, resolvedDuplicat
     });
   });
 
-  // 4. Count new members (unregistered ones)
   const newCount = unregisteredNames.length;
-
-  // 5. Invalid name count:
   const totalAtSymbols = (textToParse.match(/@/g) || []).length;
   const invalidCount = Math.max(0, totalAtSymbols - parsedNames.length);
-
-  // 6. Total activity added
   const totalActivityAdded = registeredCount;
   
   return {
@@ -650,3 +970,4 @@ export function calculateSubmissionStats(rawText, resolvedText, resolvedDuplicat
     totalActivityAdded
   };
 }
+

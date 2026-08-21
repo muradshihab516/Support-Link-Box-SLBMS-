@@ -48,7 +48,10 @@ let state = {
   confirmModal: null,
   duplicateResolutionModal: null,
   unregisteredResolutionModal: null,
-  submissionPreviewModal: null
+  submissionPreviewModal: null,
+  memberProfileModal: null,
+  activityDetailModal: null,
+  bulkEditSession: null
 };
 
 const listeners = new Set();
