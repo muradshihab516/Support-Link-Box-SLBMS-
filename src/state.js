@@ -51,7 +51,14 @@ let state = {
   submissionPreviewModal: null,
   memberProfileModal: null,
   activityDetailModal: null,
-  bulkEditSession: null
+  bulkEditSession: null,
+  managementSelectedDate: null,
+  managementSearchQuery: '',
+  managementActiveTab: 'all',
+  managementAddMemberDateModal: null,
+  managementReplaceMemberModal: null,
+  memberProfileHistoryFilter: 'all',
+  memberProfileHistorySearch: ''
 };
 
 const listeners = new Set();

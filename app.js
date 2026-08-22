@@ -21,8 +21,15 @@ import {
   analyzeUnregisteredDuplicates, analyzeAllDuplicates, calculateSubmissionStats,
   recalculateAllMemberStatsFromLogs, addManualMemberLog, updateMemberLogStatus, deleteMemberLog,
   updateActivityLog, deleteActivityLog,
-  updateMemberDetails, addMemberAlias, removeMemberAlias
+  updateMemberDetails, addMemberAlias, removeMemberAlias,
+  deleteDailySubmissionRecord, addMemberToDateSubmission, removeMemberFromDateSubmission,
+  markSubmissionInvalid, replaceMemberInDateSubmission
 } from './src/member.js';
+import { 
+  renderManagementSection, 
+  renderManagementAddMemberModal, 
+  renderManagementReplaceMemberModal 
+} from './src/management.js';
 import { showToast } from './src/toast.js';
 import { showAlert, showConfirm } from './src/modal.js';
 
@@ -226,17 +233,17 @@ function render() {
       ` : ''}
 
       <div class="sticky top-[73px] z-30 pb-4 pt-2 -mx-4 px-4 sm:mx-0 sm:px-0 bg-slate-950/80 backdrop-blur-lg border-b border-slate-900/50 sm:border-none">
-        <div class="max-w-3xl mx-auto bg-slate-900/90 border border-slate-800/80 p-3 sm:p-4 rounded-3xl shadow-[0_16px_40px_rgba(0,0,0,0.6)]">
-          <div class="grid grid-cols-5 gap-1.5 sm:gap-4 justify-items-center">
+        <div class="max-w-4xl mx-auto bg-slate-900/90 border border-slate-800/80 p-3 sm:p-4 rounded-3xl shadow-[0_16px_40px_rgba(0,0,0,0.6)]">
+          <div class="grid grid-cols-6 gap-1 sm:gap-3 justify-items-center">
             
             <!-- App Icon 1: Leaderboard -->
             <button data-tab="leaderboards" class="tab-btn flex flex-col items-center gap-1.5 focus:outline-none transition group cursor-pointer w-full max-w-[80px]">
-              <div class="w-10 h-10 sm:w-14 sm:h-14 rounded-2xl flex items-center justify-center transition-all duration-300 transform group-hover:scale-105 active:scale-95 ${
+              <div class="w-10 h-10 sm:w-13 sm:h-13 rounded-2xl flex items-center justify-center transition-all duration-300 transform group-hover:scale-105 active:scale-95 ${
                 state.currentTab === 'leaderboards'
                   ? 'bg-gradient-to-tr from-amber-500 to-yellow-600 text-slate-950 shadow-[0_0_20px_rgba(245,158,11,0.45)] ring-2 ring-amber-400'
                   : 'bg-slate-950 border border-slate-850 text-slate-400 group-hover:text-amber-400 group-hover:border-slate-700 shadow-[inset_0_1px_1px_rgba(255,255,255,0.03)]'
               }">
-                <i data-lucide="trophy" class="w-4 h-4 sm:w-6 sm:h-6"></i>
+                <i data-lucide="trophy" class="w-4 h-4 sm:w-5 sm:h-5"></i>
               </div>
               <span class="text-[8px] sm:text-xs font-black tracking-tight text-center leading-tight transition-colors ${
                 state.currentTab === 'leaderboards' ? 'text-amber-400 font-extrabold' : 'text-slate-400 group-hover:text-slate-200'
@@ -246,12 +253,12 @@ function render() {
 
             <!-- App Icon 2: Directory -->
             <button data-tab="members" class="tab-btn flex flex-col items-center gap-1.5 focus:outline-none transition group cursor-pointer w-full max-w-[80px]">
-              <div class="w-10 h-10 sm:w-14 sm:h-14 rounded-2xl flex items-center justify-center transition-all duration-300 transform group-hover:scale-105 active:scale-95 ${
+              <div class="w-10 h-10 sm:w-13 sm:h-13 rounded-2xl flex items-center justify-center transition-all duration-300 transform group-hover:scale-105 active:scale-95 ${
                 state.currentTab === 'members'
                   ? 'bg-gradient-to-tr from-emerald-500 to-teal-600 text-slate-950 shadow-[0_0_20px_rgba(16,185,129,0.45)] ring-2 ring-emerald-400'
                   : 'bg-slate-950 border border-slate-850 text-slate-400 group-hover:text-emerald-400 group-hover:border-slate-700 shadow-[inset_0_1px_1px_rgba(255,255,255,0.03)]'
               }">
-                <i data-lucide="users" class="w-4 h-4 sm:w-6 sm:h-6"></i>
+                <i data-lucide="users" class="w-4 h-4 sm:w-5 sm:h-5"></i>
               </div>
               <span class="text-[8px] sm:text-xs font-black tracking-tight text-center leading-tight transition-colors ${
                 state.currentTab === 'members' ? 'text-emerald-400 font-extrabold' : 'text-slate-400 group-hover:text-slate-200'
@@ -261,12 +268,12 @@ function render() {
 
             <!-- App Icon 3: Link Tracker -->
             <button data-tab="bulk_input" class="tab-btn flex flex-col items-center gap-1.5 focus:outline-none transition group cursor-pointer w-full max-w-[80px]">
-              <div class="w-10 h-10 sm:w-14 sm:h-14 rounded-2xl flex items-center justify-center transition-all duration-300 transform group-hover:scale-105 active:scale-95 ${
+              <div class="w-10 h-10 sm:w-13 sm:h-13 rounded-2xl flex items-center justify-center transition-all duration-300 transform group-hover:scale-105 active:scale-95 ${
                 state.currentTab === 'bulk_input'
                   ? 'bg-gradient-to-tr from-indigo-500 to-blue-600 text-white shadow-[0_0_20px_rgba(99,102,241,0.45)] ring-2 ring-indigo-400'
                   : 'bg-slate-950 border border-slate-850 text-slate-400 group-hover:text-indigo-400 group-hover:border-slate-700 shadow-[inset_0_1px_1px_rgba(255,255,255,0.03)]'
               }">
-                <i data-lucide="clipboard-list" class="w-4 h-4 sm:w-6 sm:h-6"></i>
+                <i data-lucide="clipboard-list" class="w-4 h-4 sm:w-5 sm:h-5"></i>
               </div>
               <span class="text-[8px] sm:text-xs font-black tracking-tight text-center leading-tight transition-colors ${
                 state.currentTab === 'bulk_input' ? 'text-indigo-400 font-extrabold' : 'text-slate-400 group-hover:text-slate-200'
@@ -274,14 +281,29 @@ function render() {
               ${state.currentTab === 'bulk_input' ? '<div class="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse shadow-[0_0_8px_#818cf8]"></div>' : ''}
             </button>
 
-            <!-- App Icon 4: Notice -->
+            <!-- App Icon 4: Management -->
+            <button data-tab="management" class="tab-btn flex flex-col items-center gap-1.5 focus:outline-none transition group cursor-pointer w-full max-w-[80px]">
+              <div class="w-10 h-10 sm:w-13 sm:h-13 rounded-2xl flex items-center justify-center transition-all duration-300 transform group-hover:scale-105 active:scale-95 ${
+                state.currentTab === 'management'
+                  ? 'bg-gradient-to-tr from-cyan-500 to-indigo-600 text-white shadow-[0_0_20px_rgba(6,182,212,0.45)] ring-2 ring-cyan-400'
+                  : 'bg-slate-950 border border-slate-850 text-slate-400 group-hover:text-cyan-400 group-hover:border-slate-700 shadow-[inset_0_1px_1px_rgba(255,255,255,0.03)]'
+              }">
+                <i data-lucide="clipboard-check" class="w-4 h-4 sm:w-5 sm:h-5"></i>
+              </div>
+              <span class="text-[8px] sm:text-xs font-black tracking-tight text-center leading-tight transition-colors ${
+                state.currentTab === 'management' ? 'text-cyan-400 font-extrabold' : 'text-slate-400 group-hover:text-slate-200'
+              }">ম্যানেজমেন্ট</span>
+              ${state.currentTab === 'management' ? '<div class="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse shadow-[0_0_8px_#22d3ee]"></div>' : ''}
+            </button>
+
+            <!-- App Icon 5: Notice -->
             <button data-tab="notices" class="tab-btn flex flex-col items-center gap-1.5 focus:outline-none transition group cursor-pointer w-full max-w-[80px]">
-              <div class="w-10 h-10 sm:w-14 sm:h-14 rounded-2xl flex items-center justify-center transition-all duration-300 transform group-hover:scale-105 active:scale-95 ${
+              <div class="w-10 h-10 sm:w-13 sm:h-13 rounded-2xl flex items-center justify-center transition-all duration-300 transform group-hover:scale-105 active:scale-95 ${
                 state.currentTab === 'notices'
                   ? 'bg-gradient-to-tr from-rose-500 to-orange-600 text-white shadow-[0_0_20px_rgba(244,63,94,0.45)] ring-2 ring-rose-400'
                   : 'bg-slate-950 border border-slate-850 text-slate-400 group-hover:text-rose-400 group-hover:border-slate-700 shadow-[inset_0_1px_1px_rgba(255,255,255,0.03)]'
               }">
-                <i data-lucide="megaphone" class="w-4 h-4 sm:w-6 sm:h-6"></i>
+                <i data-lucide="megaphone" class="w-4 h-4 sm:w-5 sm:h-5"></i>
               </div>
               <span class="text-[8px] sm:text-xs font-black tracking-tight text-center leading-tight transition-colors ${
                 state.currentTab === 'notices' ? 'text-rose-400 font-extrabold' : 'text-slate-400 group-hover:text-slate-200'
@@ -289,19 +311,19 @@ function render() {
               ${state.currentTab === 'notices' ? '<div class="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse shadow-[0_0_8px_#fb7185]"></div>' : ''}
             </button>
 
-            <!-- App Icon 5: Report Card -->
+            <!-- App Icon 6: Report Card -->
             <button data-tab="reports" class="tab-btn flex flex-col items-center gap-1.5 focus:outline-none transition group cursor-pointer w-full max-w-[80px]">
-              <div class="w-10 h-10 sm:w-14 sm:h-14 rounded-2xl flex items-center justify-center transition-all duration-300 transform group-hover:scale-105 active:scale-95 ${
+              <div class="w-10 h-10 sm:w-13 sm:h-13 rounded-2xl flex items-center justify-center transition-all duration-300 transform group-hover:scale-105 active:scale-95 ${
                 state.currentTab === 'reports'
-                  ? 'bg-gradient-to-tr from-cyan-500 to-sky-600 text-slate-950 shadow-[0_0_20px_rgba(6,182,212,0.45)] ring-2 ring-cyan-400'
-                  : 'bg-slate-950 border border-slate-850 text-slate-400 group-hover:text-cyan-400 group-hover:border-slate-700 shadow-[inset_0_1px_1px_rgba(255,255,255,0.03)]'
+                  ? 'bg-gradient-to-tr from-teal-500 to-sky-600 text-slate-950 shadow-[0_0_20px_rgba(20,184,166,0.45)] ring-2 ring-teal-400'
+                  : 'bg-slate-950 border border-slate-850 text-slate-400 group-hover:text-teal-400 group-hover:border-slate-700 shadow-[inset_0_1px_1px_rgba(255,255,255,0.03)]'
               }">
-                <i data-lucide="trending-up" class="w-4 h-4 sm:w-6 sm:h-6"></i>
+                <i data-lucide="trending-up" class="w-4 h-4 sm:w-5 sm:h-5"></i>
               </div>
               <span class="text-[8px] sm:text-xs font-black tracking-tight text-center leading-tight transition-colors ${
-                state.currentTab === 'reports' ? 'text-cyan-400 font-extrabold' : 'text-slate-400 group-hover:text-slate-200'
+                state.currentTab === 'reports' ? 'text-teal-400 font-extrabold' : 'text-slate-400 group-hover:text-slate-200'
               }">রিপোর্ট কার্ড</span>
-              ${state.currentTab === 'reports' ? '<div class="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse shadow-[0_0_8px_#22d3ee]"></div>' : ''}
+              ${state.currentTab === 'reports' ? '<div class="w-1.5 h-1.5 rounded-full bg-teal-400 animate-pulse shadow-[0_0_8px_#2dd4bf]"></div>' : ''}
             </button>
 
           </div>
@@ -387,6 +409,15 @@ function render() {
           <span class="text-xs font-bold text-slate-300 group-hover:text-white transition">লিংক ট্র্যাকার (Activity Tracker)</span>
           <div class="bg-indigo-950/40 p-1.5 rounded-lg text-indigo-400 group-hover:bg-indigo-600/20 transition border border-indigo-500/10">
             <i data-lucide="clipboard-list" class="w-4 h-4"></i>
+          </div>
+        </button>
+
+        <button data-tab="management" class="tab-btn flex items-center gap-2.5 bg-slate-950/95 border border-slate-800 hover:border-cyan-500/50 hover:bg-slate-900 px-4 py-2.5 rounded-2xl shadow-xl transition-all hover:translate-x-[-4px] group cursor-pointer ${
+          state.currentTab === 'management' ? 'border-cyan-500 text-cyan-400 bg-cyan-950/20' : ''
+        }">
+          <span class="text-xs font-bold text-slate-300 group-hover:text-white transition">ম্যানেজমেন্ট (Management)</span>
+          <div class="bg-cyan-950/40 p-1.5 rounded-lg text-cyan-400 group-hover:bg-cyan-600/20 transition border border-cyan-500/10">
+            <i data-lucide="clipboard-check" class="w-4 h-4"></i>
           </div>
         </button>
 
@@ -611,8 +642,6 @@ function render() {
     </div>
     ` : ''}
 
-    ${renderMemberProfileModal()}
-
     ${state.unregisteredResolutionModal ? `
     <!-- Custom beautiful unregistered names resolution modal with Fuzzy Suggestions -->
     <div id="unregistered-resolution-modal" class="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-[100] flex items-center justify-center p-4">
@@ -829,6 +858,8 @@ function render() {
 
     ${renderMemberProfileModal()}
     ${renderActivityDetailModal()}
+    ${renderManagementAddMemberModal(state)}
+    ${renderManagementReplaceMemberModal(state)}
   `;
 
   // Hot Reload Icons
@@ -841,6 +872,11 @@ function render() {
 // Sub-Tab HTML Render templates
 function renderTabContent(totalCount, activeCount, inactiveCount, diamondCount) {
   switch (state.currentTab) {
+    
+    // TAB: DAILY SUBMISSION MANAGEMENT
+    case 'management': {
+      return renderManagementSection(state);
+    }
     
     // TAB: SUPABASE SETTINGS
     case 'supabase': {
@@ -2473,7 +2509,7 @@ ${listText}
 function renderMemberProfileModal() {
   if (!state.memberProfileModal) return '';
   const memberId = state.memberProfileModal.memberId;
-  const member = state.members.find(m => m.id === memberId);
+  const member = (state.members && state.members.find(m => m.id === memberId)) || getMembers().find(m => m.id === memberId);
   if (!member) return '';
 
   const activeTab = state.memberProfileModal.currentTab || 'overview';
@@ -2610,9 +2646,46 @@ function renderMemberProfileModal() {
             </div>
           ` : ''}
 
-          ${activeTab === 'history' ? `
+          ${activeTab === 'history' ? (() => {
+            const historyFilter = state.memberProfileHistoryFilter || 'all';
+            const historySearch = (state.memberProfileHistorySearch || '').trim().toLowerCase();
+            
+            const activeLogsCount = allLogs.filter(l => l.is_active).length;
+            const inactiveLogsCount = allLogs.length - activeLogsCount;
+
+            const filteredLogs = allLogs.filter(log => {
+              if (historyFilter === 'active' && !log.is_active) return false;
+              if (historyFilter === 'inactive' && log.is_active) return false;
+              if (historySearch) {
+                const admin = (ADMIN_NAMES[log.submitted_by] || log.submitted_by || '').toLowerCase();
+                const date = (log.activity_date || '').toLowerCase();
+                const source = (log.source || '').toLowerCase();
+                const notes = (log.notes || '').toLowerCase();
+                return admin.includes(historySearch) || date.includes(historySearch) || source.includes(historySearch) || notes.includes(historySearch);
+              }
+              return true;
+            });
+
+            return `
             <!-- Activity History Tab -->
             <div class="space-y-4">
+              
+              <!-- Quick Stats Breakdown Banner -->
+              <div class="grid grid-cols-3 gap-2 bg-slate-950 p-2.5 rounded-2xl border border-slate-800/80 text-center">
+                <div class="p-1.5">
+                  <span class="text-[9px] text-slate-500 font-bold uppercase block">Total Recorded</span>
+                  <span class="text-sm font-black text-slate-200 font-mono">${allLogs.length} Days</span>
+                </div>
+                <div class="p-1.5 border-x border-slate-850">
+                  <span class="text-[9px] text-emerald-400 font-bold uppercase block">Active Submitted</span>
+                  <span class="text-sm font-black text-emerald-400 font-mono">${activeLogsCount} Days</span>
+                </div>
+                <div class="p-1.5">
+                  <span class="text-[9px] text-rose-400 font-bold uppercase block">Inactive / Missed</span>
+                  <span class="text-sm font-black text-rose-400 font-mono">${inactiveLogsCount} Days</span>
+                </div>
+              </div>
+
               <!-- Add Manual Submission Log Accordion/Card -->
               <div class="bg-slate-950 border border-slate-800/80 p-4 rounded-2xl space-y-3">
                 <div class="flex items-center justify-between border-b border-slate-800/60 pb-2">
@@ -2649,15 +2722,44 @@ function renderMemberProfileModal() {
                 </div>
               </div>
 
-              <!-- History Timeline Table -->
-              <div class="space-y-2">
-                <div class="flex items-center justify-between">
-                  <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wide">Submission History Timeline (${allLogs.length})</h4>
-                  <span class="text-[10px] text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded font-mono font-semibold">Click any row for details</span>
+              <!-- History Timeline & Filters Bar -->
+              <div class="space-y-3 pt-1">
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 border-b border-slate-800 pb-2">
+                  
+                  <!-- Filter Pill Tabs -->
+                  <div class="flex items-center gap-1 p-1 bg-slate-950 rounded-xl border border-slate-850 shrink-0">
+                    <button data-profile-history-filter="all" class="px-2.5 py-1 rounded-lg text-[10px] font-bold transition cursor-pointer ${
+                      historyFilter === 'all' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'
+                    }">
+                      All (${allLogs.length})
+                    </button>
+                    <button data-profile-history-filter="active" class="px-2.5 py-1 rounded-lg text-[10px] font-bold transition cursor-pointer ${
+                      historyFilter === 'active' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-emerald-400'
+                    }">
+                      Active (${activeLogsCount})
+                    </button>
+                    <button data-profile-history-filter="inactive" class="px-2.5 py-1 rounded-lg text-[10px] font-bold transition cursor-pointer ${
+                      historyFilter === 'inactive' ? 'bg-rose-600 text-white' : 'text-slate-400 hover:text-rose-400'
+                    }">
+                      Inactive (${inactiveLogsCount})
+                    </button>
+                  </div>
+
+                  <!-- Quick Search Filter -->
+                  <div class="relative flex-grow sm:max-w-xs">
+                    <i data-lucide="search" class="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2"></i>
+                    <input id="profile-history-search-input" type="text" value="${state.memberProfileHistorySearch || ''}" placeholder="তারিখ বা অ্যাডমিন খুঁজুন..." class="w-full bg-slate-950 border border-slate-800 rounded-xl pl-7 pr-7 py-1.5 text-[11px] text-slate-200 focus:outline-none focus:border-indigo-500 font-mono" />
+                    ${state.memberProfileHistorySearch ? `
+                      <button id="profile-history-clear-search-btn" class="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300">
+                        <i data-lucide="x" class="w-3 h-3"></i>
+                      </button>
+                    ` : ''}
+                  </div>
                 </div>
                 
-                <div class="max-h-[280px] overflow-y-auto space-y-2 pr-1">
-                  ${allLogs.length > 0 ? allLogs.map(log => {
+                <!-- History Items List -->
+                <div class="max-h-[300px] overflow-y-auto space-y-2 pr-1">
+                  ${filteredLogs.length > 0 ? filteredLogs.map(log => {
                     const formattedDate = formatLogDate(log.activity_date);
                     const adminName = ADMIN_NAMES[log.submitted_by] || log.submitted_by || 'Admin';
                     const sourceName = log.source || (log.id && log.id.startsWith('manual-') ? 'Manual Entry' : 'Daily Submission');
@@ -2702,7 +2804,8 @@ function renderMemberProfileModal() {
                 </div>
               </div>
             </div>
-          ` : ''}
+            `;
+          })() : ''}
 
           ${activeTab === 'edit' ? `
             <!-- Edit Profile Tab -->
@@ -3042,7 +3145,9 @@ function openActivityDetail(logId, memberId) {
 
 // Global helper to open member profile modal
 function openMemberProfile(memberId) {
+  const currentMembers = getMembers();
   updateState({
+    members: currentMembers,
     memberProfileModal: {
       memberId: memberId,
       currentTab: 'overview',
@@ -3235,14 +3340,14 @@ function triggerUnregisteredResolution(text, onComplete) {
 
   const mList = getMembers();
   const modalNames = unregisteredNames.map(name => {
-    const fuzzySuggestion = findFuzzyMemberSuggestion(name, mList, 0.45);
-    const hasStrongMatch = fuzzySuggestion && (fuzzySuggestion.similarity >= 0.55 || fuzzySuggestion.score >= 55);
+    const fuzzySuggestion = findFuzzyMemberSuggestion(name, mList, 0.70);
+    const hasStrongMatch = fuzzySuggestion && (fuzzySuggestion.similarity >= 0.85 || fuzzySuggestion.score >= 85);
     
     return {
       originalName: name,
       action: hasStrongMatch ? 'link_alias' : 'register',
       resolvedName: hasStrongMatch ? fuzzySuggestion.member.name : name,
-      suggestedMember: fuzzySuggestion ? fuzzySuggestion.member : null,
+      suggestedMember: hasStrongMatch ? fuzzySuggestion.member : null,
       similarity: fuzzySuggestion ? (fuzzySuggestion.similarity || (fuzzySuggestion.score / 100)) : 0
     };
   });
@@ -4259,40 +4364,42 @@ Generated on: ${new Date().toLocaleString()}
   // TAB EVENTS: BULK INPUT / ACTIVITY TRACKER
   if (state.currentTab === 'bulk_input') {
     
-    // Activity input text area modification
+    // Activity input text area modification with performance debouncing for mobile devices
     const textarea = document.getElementById('bulk-activity-textarea');
+    let inputDebounceTimer = null;
     if (textarea) {
       textarea.oninput = (e) => {
         const text = e.target.value;
-        const start = e.target.selectionStart;
-        const end = e.target.selectionEnd;
-
-        // Auto detect date from raw list
-        const detectedDate = detectDateFromText(text);
-
-        const nextState = { 
-          bulkInputText: text,
-          uncheckedUnregisteredNames: []
-        };
-
-        if (detectedDate) {
-          nextState.bulkInputDate = detectedDate;
-        }
-
-        updateState(nextState);
+        state.bulkInputText = text;
         
-        const tx = document.getElementById('bulk-activity-textarea');
-        if (tx) {
-          tx.focus();
-          tx.setSelectionRange(start, end);
-        }
+        clearTimeout(inputDebounceTimer);
+        inputDebounceTimer = setTimeout(() => {
+          const detectedDate = detectDateFromText(text);
+          const nextState = { 
+            bulkInputText: text,
+            uncheckedUnregisteredNames: []
+          };
+          if (detectedDate) {
+            nextState.bulkInputDate = detectedDate;
+          }
+          updateState(nextState);
+        }, 300);
       };
 
       textarea.onpaste = (e) => {
+        // Allow mobile/desktop clipboard paste to populate smoothly without blocking main thread
         setTimeout(() => {
           const text = textarea.value;
-          processDailySubmissionWorkflow(text, true);
-        }, 100);
+          const detectedDate = detectDateFromText(text);
+          const nextState = { 
+            bulkInputText: text,
+            uncheckedUnregisteredNames: []
+          };
+          if (detectedDate) {
+            nextState.bulkInputDate = detectedDate;
+          }
+          updateState(nextState);
+        }, 60);
       };
     }
 
@@ -4304,11 +4411,29 @@ Generated on: ${new Date().toLocaleString()}
       };
     }
 
-    // Submit Action Save button click (saves activity for ALL detected matched members)
+    // Submit Action Save button click (saves activity with async UI responsiveness)
     const saveBtn = document.getElementById('save-activity-btn');
     if (saveBtn) {
       saveBtn.onclick = () => {
-        processDailySubmissionWorkflow(state.bulkInputText, false);
+        if (!state.bulkInputText || !state.bulkInputText.trim()) {
+          showToast('দয়া করে ডেইলি লিঙ্ক সাবমিশনের টেক্সট প্রদান করুন!', 'error');
+          return;
+        }
+
+        saveBtn.disabled = true;
+        const originalHtml = saveBtn.innerHTML;
+        saveBtn.innerHTML = `<span class="inline-block animate-spin mr-1.5">⏳</span> প্রক্রিয়াকরণ হচ্ছে...`;
+        
+        setTimeout(() => {
+          try {
+            processDailySubmissionWorkflow(state.bulkInputText, false);
+          } finally {
+            if (saveBtn) {
+              saveBtn.disabled = false;
+              saveBtn.innerHTML = originalHtml;
+            }
+          }
+        }, 20);
       };
     }
 
@@ -5306,11 +5431,11 @@ function bindLoginEvents() {
     };
   }
 
-  // GLOBAL: Open Member Profile from any view
+  // GLOBAL: Open Member Profile from any view (robust event delegation)
   document.querySelectorAll('[data-open-profile]').forEach(el => {
     el.onclick = (e) => {
       e.stopPropagation();
-      const mId = el.getAttribute('data-open-profile');
+      const mId = el.getAttribute('data-open-profile') || el.closest('[data-open-profile]')?.getAttribute('data-open-profile');
       if (mId) {
         openMemberProfile(mId);
       }
@@ -5496,6 +5621,296 @@ function bindLoginEvents() {
         }
       };
     });
+
+    // Profile History Filter Tabs
+    document.querySelectorAll('[data-profile-history-filter]').forEach(btn => {
+      btn.onclick = (e) => {
+        const filter = e.currentTarget.getAttribute('data-profile-history-filter');
+        updateState({ memberProfileHistoryFilter: filter });
+      };
+    });
+
+    // Profile History Search Input
+    const profileHistorySearchInp = document.getElementById('profile-history-search-input');
+    if (profileHistorySearchInp) {
+      profileHistorySearchInp.oninput = (e) => {
+        updateState({ memberProfileHistorySearch: e.target.value });
+      };
+    }
+    const profileHistoryClearBtn = document.getElementById('profile-history-clear-search-btn');
+    if (profileHistoryClearBtn) {
+      profileHistoryClearBtn.onclick = () => {
+        updateState({ memberProfileHistorySearch: '' });
+      };
+    }
+  }
+
+  // ================= MANAGEMENT SECTION EVENTS =================
+  // Date picker
+  const mgmtDateInp = document.getElementById('management-date-input');
+  if (mgmtDateInp) {
+    mgmtDateInp.onchange = (e) => {
+      updateState({ managementSelectedDate: e.target.value });
+    };
+  }
+
+  // Prev / Next / Today Date buttons
+  const mgmtPrevDateBtn = document.getElementById('management-prev-date-btn');
+  if (mgmtPrevDateBtn) {
+    mgmtPrevDateBtn.onclick = () => {
+      const cur = state.managementSelectedDate || new Date().toISOString().split('T')[0];
+      const d = new Date(cur);
+      d.setDate(d.getDate() - 1);
+      updateState({ managementSelectedDate: d.toISOString().split('T')[0] });
+    };
+  }
+
+  const mgmtNextDateBtn = document.getElementById('management-next-date-btn');
+  if (mgmtNextDateBtn) {
+    mgmtNextDateBtn.onclick = () => {
+      const cur = state.managementSelectedDate || new Date().toISOString().split('T')[0];
+      const d = new Date(cur);
+      d.setDate(d.getDate() + 1);
+      updateState({ managementSelectedDate: d.toISOString().split('T')[0] });
+    };
+  }
+
+  const mgmtTodayBtn = document.getElementById('management-today-btn');
+  if (mgmtTodayBtn) {
+    mgmtTodayBtn.onclick = () => {
+      updateState({ managementSelectedDate: new Date().toISOString().split('T')[0] });
+    };
+  }
+
+  // Management Sub-tabs
+  document.querySelectorAll('[data-management-tab]').forEach(btn => {
+    btn.onclick = (e) => {
+      const tab = e.currentTarget.getAttribute('data-management-tab');
+      updateState({ managementActiveTab: tab });
+    };
+  });
+
+  // Archive select date
+  document.querySelectorAll('[data-management-select-date]').forEach(btn => {
+    btn.onclick = (e) => {
+      const date = e.currentTarget.getAttribute('data-management-select-date');
+      updateState({ 
+        managementSelectedDate: date,
+        managementActiveTab: 'active'
+      });
+    };
+  });
+
+  // Delete Date Submission Record
+  const deleteDateHandler = (date) => {
+    if (!date) return;
+    showConfirm(
+      `${date} তারিখের সম্পূর্ণ Daily Link Submission মুছে ফেলতে চান? সেদিনের সকল মেম্বারের স্ট্যাটাস ও পয়েন্ট স্বয়ংক্রিয়ভাবে পুনরায় গণনা করা হবে এবং Audit Log-এ সংরক্ষিত হবে।`,
+      () => {
+        if (deleteDailySubmissionRecord(date, state.currentAdminEmail)) {
+          showToast(`${date} তারিখের সাবমিশন সফলভাবে মুছে ফেলা হয়েছে!`, 'success');
+        } else {
+          showToast('সাবমিশন মুছতে সমস্যা হয়েছে।', 'error');
+        }
+      },
+      null,
+      'তারিখের রেকর্ড মুছুন'
+    );
+  };
+
+  const mgmtDeleteDateBtn = document.getElementById('management-delete-date-submission-btn');
+  if (mgmtDeleteDateBtn) {
+    mgmtDeleteDateBtn.onclick = () => {
+      deleteDateHandler(state.managementSelectedDate);
+    };
+  }
+
+  document.querySelectorAll('[data-management-delete-date]').forEach(btn => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      const date = e.currentTarget.getAttribute('data-management-delete-date');
+      deleteDateHandler(date);
+    };
+  });
+
+  // Search input in management
+  const mgmtSearchInp = document.getElementById('management-search-input');
+  if (mgmtSearchInp) {
+    mgmtSearchInp.oninput = (e) => {
+      updateState({ managementSearchQuery: e.target.value });
+    };
+  }
+
+  const mgmtClearSearchBtn = document.getElementById('management-clear-search-btn');
+  if (mgmtClearSearchBtn) {
+    mgmtClearSearchBtn.onclick = () => {
+      updateState({ managementSearchQuery: '' });
+    };
+  }
+
+  // Open Add Member to Date Modal
+  const mgmtAddMemberDateBtn = document.getElementById('management-add-member-date-btn');
+  if (mgmtAddMemberDateBtn) {
+    mgmtAddMemberDateBtn.onclick = () => {
+      updateState({
+        managementAddMemberModal: {
+          date: state.managementSelectedDate || new Date().toISOString().split('T')[0],
+          selectedMemberId: '',
+          points: 10
+        }
+      });
+    };
+  }
+
+  // Quick Mark Active from Inactive Tab
+  document.querySelectorAll('[data-management-add-active]').forEach(btn => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      const memberId = e.currentTarget.getAttribute('data-management-add-active');
+      const date = state.managementSelectedDate || new Date().toISOString().split('T')[0];
+      if (addMemberToDateSubmission(date, memberId, 10, state.currentAdminEmail)) {
+        showToast('মেম্বারকে এই দিনের তালিকায় Active হিসেবে যোগ করা হয়েছে!', 'success');
+      } else {
+        showToast('মেম্বার যোগ করতে সমস্যা হয়েছে।', 'error');
+      }
+    };
+  });
+
+  // Mark Submission Invalid
+  document.querySelectorAll('[data-management-invalidate-member]').forEach(btn => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      const logId = e.currentTarget.getAttribute('data-management-invalidate-member');
+      const name = e.currentTarget.getAttribute('data-member-name') || 'মেম্বার';
+      showConfirm(
+        `আপনি কি নিশ্চিতভাবে ${name}-এর লিঙ্ক সাবমিশন ইনভ্যালিড করতে চান?`,
+        () => {
+          if (markSubmissionInvalid(logId, state.currentAdminEmail)) {
+            showToast(`${name}-এর সাবমিশন ইনভ্যালিড করা হয়েছে।`, 'info');
+          } else {
+            showToast('অপারেশন ব্যর্থ হয়েছে।', 'error');
+          }
+        },
+        null,
+        'ইনভ্যালিড করুন'
+      );
+    };
+  });
+
+  // Remove Member from Date
+  document.querySelectorAll('[data-management-remove-member]').forEach(btn => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      const logId = e.currentTarget.getAttribute('data-management-remove-member');
+      const name = e.currentTarget.getAttribute('data-member-name') || 'মেম্বার';
+      showConfirm(
+        `আপনি কি নিশ্চিতভাবে এই দিনের তালিকা থেকে ${name}-কে বাদ দিতে চান?`,
+        () => {
+          if (removeMemberFromDateSubmission(logId, state.currentAdminEmail)) {
+            showToast(`${name}-কে তালিকা থেকে বাদ দেওয়া হয়েছে।`, 'info');
+          } else {
+            showToast('বাদ দিতে সমস্যা হয়েছে।', 'error');
+          }
+        },
+        null,
+        'বাদ দিন'
+      );
+    };
+  });
+
+  // Open Replace Member Modal
+  document.querySelectorAll('[data-management-replace-member]').forEach(btn => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      const logId = e.currentTarget.getAttribute('data-management-replace-member');
+      const oldMemberId = e.currentTarget.getAttribute('data-old-member-id');
+      const oldMemberName = e.currentTarget.getAttribute('data-old-member-name') || 'মেম্বার';
+      updateState({
+        managementReplaceMemberModal: {
+          logId,
+          oldMemberId,
+          oldMemberName,
+          date: state.managementSelectedDate,
+          replacementMemberId: ''
+        }
+      });
+    };
+  });
+
+  // Add Member Modal Actions
+  if (state.managementAddMemberModal) {
+    const closeAddModal = () => updateState({ managementAddMemberModal: null });
+    const closeAddBtn = document.getElementById('close-management-add-member-modal-btn');
+    const cancelAddBtn = document.getElementById('cancel-management-add-member-btn');
+    const addOverlay = document.getElementById('management-add-member-modal-overlay');
+    const submitAddBtn = document.getElementById('submit-management-add-member-btn');
+
+    if (closeAddBtn) closeAddBtn.onclick = closeAddModal;
+    if (cancelAddBtn) cancelAddBtn.onclick = closeAddModal;
+    if (addOverlay) {
+      addOverlay.onclick = (e) => {
+        if (e.target === addOverlay) closeAddModal();
+      };
+    }
+
+    if (submitAddBtn) {
+      submitAddBtn.onclick = () => {
+        const sel = document.getElementById('management-add-member-select');
+        const pts = document.getElementById('management-add-points-input');
+        const memberId = sel ? sel.value : '';
+        const points = pts ? parseInt(pts.value, 10) || 10 : 10;
+        const date = state.managementAddMemberModal.date;
+
+        if (!memberId) {
+          showToast('দয়া করে একজন মেম্বার নির্বাচন করুন!', 'error');
+          return;
+        }
+
+        if (addMemberToDateSubmission(date, memberId, points, state.currentAdminEmail)) {
+          showToast('মেম্বারকে সফলভাবে সাবমিশনে যোগ করা হয়েছে!', 'success');
+          closeAddModal();
+        } else {
+          showToast('মেম্বার যোগ করতে সমস্যা হয়েছে।', 'error');
+        }
+      };
+    }
+  }
+
+  // Replace Member Modal Actions
+  if (state.managementReplaceMemberModal) {
+    const closeReplaceModal = () => updateState({ managementReplaceMemberModal: null });
+    const closeReplaceBtn = document.getElementById('close-management-replace-member-modal-btn');
+    const cancelReplaceBtn = document.getElementById('cancel-management-replace-member-btn');
+    const replaceOverlay = document.getElementById('management-replace-member-modal-overlay');
+    const submitReplaceBtn = document.getElementById('submit-management-replace-member-btn');
+
+    if (closeReplaceBtn) closeReplaceBtn.onclick = closeReplaceModal;
+    if (cancelReplaceBtn) cancelReplaceBtn.onclick = closeReplaceModal;
+    if (replaceOverlay) {
+      replaceOverlay.onclick = (e) => {
+        if (e.target === replaceOverlay) closeReplaceModal();
+      };
+    }
+
+    if (submitReplaceBtn) {
+      submitReplaceBtn.onclick = () => {
+        const sel = document.getElementById('management-replace-member-select');
+        const newMemberId = sel ? sel.value : '';
+        const logId = state.managementReplaceMemberModal.logId;
+
+        if (!newMemberId) {
+          showToast('দয়া করে সঠিক মেম্বার নির্বাচন করুন!', 'error');
+          return;
+        }
+
+        if (replaceMemberInDateSubmission(logId, newMemberId, state.currentAdminEmail)) {
+          showToast('মেম্বার সফলভাবে প্রতিস্থাপন করা হয়েছে!', 'success');
+          closeReplaceModal();
+        } else {
+          showToast('প্রতিস্থাপন করতে সমস্যা হয়েছে।', 'error');
+        }
+      };
+    }
   }
 
   // Bind Global Activity Detail Modal Trigger (from History, Overview, or Reports)
@@ -5626,7 +6041,8 @@ function bindLoginEvents() {
 // Kickstart Application
 window.addEventListener('DOMContentLoaded', () => {
   loadStateFromStorage();
-  updateState({});
+  recalculateAllMemberStatsFromLogs();
+  updateState({ members: getMembers() });
 
   // Register PWA Service Worker
   if ('serviceWorker' in navigator) {

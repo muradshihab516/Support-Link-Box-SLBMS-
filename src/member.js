@@ -536,37 +536,52 @@ export function recalculateAllMemberStatsFromLogs(explicitLogs = null, membersLi
       currentStreak = 0;
     }
 
-    // Calculate Inactivity Counter
+    // Calculate Inactivity Counter & Status
     let consecutiveInactiveDays = 0;
-    if (allSubmissionDates.length === 0) {
-      consecutiveInactiveDays = 0;
-    } else if (!lastActiveDate) {
-      if (member.created_at) {
-        const joinDate = member.created_at.split('T')[0];
-        const datesSinceJoined = allSubmissionDates.filter(d => d >= joinDate);
-        consecutiveInactiveDays = datesSinceJoined.length;
-      } else {
-        consecutiveInactiveDays = allSubmissionDates.length;
-      }
-    } else if (lastActiveDate === latestTrackedDate) {
-      consecutiveInactiveDays = 0;
-    } else {
-      // Days between latest submission and last active date
-      consecutiveInactiveDays = getDiffDays(latestTrackedDate, lastActiveDate);
-    }
-
-    // Determine status: activity on latest tracked date always ensures active status
     let status = member.status;
-    if (consecutiveInactiveDays === 0) {
-      status = 'active';
-    } else if (status === 'frozen') {
-      // Retain frozen status if still inactive
-    } else if (consecutiveInactiveDays >= 12) {
-      status = 'inactive';
-    } else if (consecutiveInactiveDays >= 7) {
-      status = 'warning';
+
+    if (status === 'frozen') {
+      // Frozen members strictly stay frozen with 0 consecutive inactive days unless they actively submitted on latestTrackedDate
+      if (latestTrackedDate && activeDates.has(latestTrackedDate)) {
+        status = 'active';
+        consecutiveInactiveDays = 0;
+      } else {
+        status = 'frozen';
+        consecutiveInactiveDays = 0;
+      }
     } else {
-      status = 'active';
+      if (allSubmissionDates.length === 0 || !latestTrackedDate) {
+        consecutiveInactiveDays = 0;
+      } else if (activeDates.has(latestTrackedDate)) {
+        consecutiveInactiveDays = 0;
+      } else {
+        // Count consecutive submission dates backwards from latestTrackedDate where the member was NOT active
+        for (let i = allSubmissionDates.length - 1; i >= 0; i--) {
+          const d = allSubmissionDates[i];
+          if (member.created_at) {
+            const joinDate = member.created_at.split('T')[0];
+            if (d < joinDate) {
+              // Member had not joined yet on this submission date
+              break;
+            }
+          }
+          if (!activeDates.has(d)) {
+            consecutiveInactiveDays++;
+          } else {
+            // Reached member's most recent active submission date, stop counting
+            break;
+          }
+        }
+      }
+
+      // Determine status for non-frozen members based on missed submission rounds
+      if (consecutiveInactiveDays >= 12) {
+        status = 'inactive';
+      } else if (consecutiveInactiveDays >= 7) {
+        status = 'warning';
+      } else {
+        status = 'active';
+      }
     }
 
     // Assign badges
@@ -843,6 +858,253 @@ export function deleteMemberLog(logId) {
 }
 
 export const deleteActivityLog = deleteMemberLog;
+
+// ----------------------------------------------------
+// DAILY SUBMISSION MANAGEMENT (Management Tab Engine)
+// ----------------------------------------------------
+
+// Delete entire daily submission record for a date
+export function deleteDailySubmissionRecord(dateStr) {
+  let logs = getActivityLogs();
+  const logsToDelete = logs.filter(l => l.activity_date === dateStr);
+  if (logsToDelete.length === 0) {
+    showToast(`${dateStr} তারিখের কোনো সাবমিশন রেকর্ড পাওয়া যায়নি!`, 'error');
+    return false;
+  }
+
+  const state = getState();
+  const currentEmail = state.currentAdminEmail || 'shihab@linkbox.com';
+  const adminName = ADMIN_NAMES[currentEmail] || currentEmail;
+
+  // Remove all logs for this date
+  logs = logs.filter(l => l.activity_date !== dateStr);
+  saveActivityLogs(logs);
+
+  // Recalculate all member stats from remaining logs
+  recalculateAllMemberStatsFromLogs(logs);
+
+  // Record in Audit Trail
+  const auditTrails = getAuditTrails();
+  auditTrails.unshift({
+    id: `audit-${generateUUID()}`,
+    admin_email: currentEmail,
+    admin_name: adminName,
+    action: 'DELETE_DAILY_RECORD',
+    entity_type: 'DAILY_SUBMISSION',
+    description: `Deleted complete daily submission record for date: ${dateStr} (${logsToDelete.length} activity logs removed). Recalculated all member streaks & points.`,
+    timestamp: new Date().toISOString()
+  });
+  saveAuditTrails(auditTrails);
+
+  updateState({
+    members: getMembers(),
+    auditTrails: getAuditTrails(),
+    managementSelectedDate: null
+  });
+
+  showToast(`${dateStr} তারিখের সম্পূর্ণ সাবমিশন রেকর্ড মুছে ফেলা হয়েছে এবং পয়েন্ট/স্ট্রেইক রিক্যালকুলেট হয়েছে!`, 'success');
+  return true;
+}
+
+// Add a member to a specific date's active submission
+export function addMemberToDateSubmission(dateStr, memberId) {
+  const members = getMembers();
+  const member = members.find(m => m.id === memberId);
+  if (!member) {
+    showToast('মেম্বার খুঁজে পাওয়া যায়নি!', 'error');
+    return false;
+  }
+
+  let logs = getActivityLogs();
+  // Remove existing log for this member on this date if any
+  logs = logs.filter(l => !(l.member_id === memberId && l.activity_date === dateStr));
+
+  const state = getState();
+  const currentEmail = state.currentAdminEmail || 'shihab@linkbox.com';
+  const adminName = ADMIN_NAMES[currentEmail] || currentEmail;
+
+  const newLog = {
+    id: `log-${memberId}-${dateStr}-${Date.now().toString(36)}`,
+    member_id: memberId,
+    activity_date: dateStr,
+    is_active: true,
+    points_earned: CONFIG.POINTS.DAILY_ACTIVITY,
+    submitted_by: currentEmail,
+    source: 'Admin Management',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  };
+
+  logs.push(newLog);
+  saveActivityLogs(logs);
+  recalculateAllMemberStatsFromLogs(logs);
+
+  const auditTrails = getAuditTrails();
+  auditTrails.unshift({
+    id: `audit-${generateUUID()}`,
+    admin_email: currentEmail,
+    admin_name: adminName,
+    action: 'SUBMISSION_MEMBER_ADDED',
+    entity_type: 'DAILY_SUBMISSION',
+    description: `Added ${member.name} to ${dateStr} active submission (+10 Pts).`,
+    timestamp: new Date().toISOString()
+  });
+  saveAuditTrails(auditTrails);
+
+  updateState({
+    members: getMembers(),
+    auditTrails: getAuditTrails()
+  });
+
+  showToast(`${member.name}-কে ${dateStr} তারিখের Active সাবমিশনে যোগ করা হয়েছে!`, 'success');
+  return true;
+}
+
+// Remove a member from a date's active submission
+export function removeMemberFromDateSubmission(dateStr, memberId) {
+  const members = getMembers();
+  const member = members.find(m => m.id === memberId);
+  const memberName = member ? member.name : memberId;
+
+  let logs = getActivityLogs();
+  const existingLog = logs.find(l => l.member_id === memberId && l.activity_date === dateStr);
+  if (!existingLog) {
+    showToast('এই মেম্বারের সাবমিশন রেকর্ড পাওয়া যায়নি!', 'error');
+    return false;
+  }
+
+  logs = logs.filter(l => !(l.member_id === memberId && l.activity_date === dateStr));
+  saveActivityLogs(logs);
+  recalculateAllMemberStatsFromLogs(logs);
+
+  const state = getState();
+  const currentEmail = state.currentAdminEmail || 'shihab@linkbox.com';
+  const adminName = ADMIN_NAMES[currentEmail] || currentEmail;
+
+  const auditTrails = getAuditTrails();
+  auditTrails.unshift({
+    id: `audit-${generateUUID()}`,
+    admin_email: currentEmail,
+    admin_name: adminName,
+    action: 'SUBMISSION_MEMBER_REMOVED',
+    entity_type: 'DAILY_SUBMISSION',
+    description: `Removed ${memberName} from ${dateStr} submission list. Recalculated stats.`,
+    timestamp: new Date().toISOString()
+  });
+  saveAuditTrails(auditTrails);
+
+  updateState({
+    members: getMembers(),
+    auditTrails: getAuditTrails()
+  });
+
+  showToast(`${memberName}-কে ${dateStr} তারিখের তালিকা থেকে বাদ দেওয়া হয়েছে!`, 'info');
+  return true;
+}
+
+// Mark a member's link as invalid on a specific date
+export function markSubmissionInvalid(dateStr, memberId) {
+  const members = getMembers();
+  const member = members.find(m => m.id === memberId);
+  const memberName = member ? member.name : memberId;
+
+  let logs = getActivityLogs();
+  const logIdx = logs.findIndex(l => l.member_id === memberId && l.activity_date === dateStr);
+  if (logIdx === -1) {
+    showToast('এই তারিখের সাবমিশন লগ পাওয়া যায়নি!', 'error');
+    return false;
+  }
+
+  logs[logIdx].is_active = false;
+  logs[logIdx].points_earned = 0;
+  logs[logIdx].status = 'invalid';
+  logs[logIdx].notes = 'Marked invalid by admin';
+  logs[logIdx].updated_at = new Date().toISOString();
+
+  saveActivityLogs(logs);
+  recalculateAllMemberStatsFromLogs(logs);
+
+  const state = getState();
+  const currentEmail = state.currentAdminEmail || 'shihab@linkbox.com';
+  const adminName = ADMIN_NAMES[currentEmail] || currentEmail;
+
+  const auditTrails = getAuditTrails();
+  auditTrails.unshift({
+    id: `audit-${generateUUID()}`,
+    admin_email: currentEmail,
+    admin_name: adminName,
+    action: 'SUBMISSION_INVALIDATED',
+    entity_type: 'DAILY_SUBMISSION',
+    description: `Marked submission as INVALID for ${memberName} on ${dateStr}. Deducted points & recalculated streak.`,
+    timestamp: new Date().toISOString()
+  });
+  saveAuditTrails(auditTrails);
+
+  updateState({
+    members: getMembers(),
+    auditTrails: getAuditTrails()
+  });
+
+  showToast(`${memberName}-এর ${dateStr} তারিখের লিংক ইনভ্যালিড মার্ক করা হয়েছে!`, 'warning');
+  return true;
+}
+
+// Replace a member in a date's submission with another member
+export function replaceMemberInDateSubmission(dateStr, oldMemberId, newMemberId) {
+  const members = getMembers();
+  const oldMember = members.find(m => m.id === oldMemberId);
+  const newMember = members.find(m => m.id === newMemberId);
+
+  if (!newMember) {
+    showToast('নতুন প্রতিস্থাপক মেম্বার নির্বাচন করুন!', 'error');
+    return false;
+  }
+
+  let logs = getActivityLogs();
+  const logIdx = logs.findIndex(l => l.member_id === oldMemberId && l.activity_date === dateStr);
+  if (logIdx === -1) {
+    showToast('মূল সাবমিশন লগ পাওয়া যায়নি!', 'error');
+    return false;
+  }
+
+  // Remove any existing log for newMember on that date first
+  logs = logs.filter(l => !(l.member_id === newMemberId && l.activity_date === dateStr));
+
+  // Find index again after filter
+  const targetIdx = logs.findIndex(l => l.member_id === oldMemberId && l.activity_date === dateStr);
+  if (targetIdx !== -1) {
+    logs[targetIdx].member_id = newMemberId;
+    logs[targetIdx].updated_at = new Date().toISOString();
+  }
+
+  saveActivityLogs(logs);
+  recalculateAllMemberStatsFromLogs(logs);
+
+  const state = getState();
+  const currentEmail = state.currentAdminEmail || 'shihab@linkbox.com';
+  const adminName = ADMIN_NAMES[currentEmail] || currentEmail;
+  const oldName = oldMember ? oldMember.name : oldMemberId;
+
+  const auditTrails = getAuditTrails();
+  auditTrails.unshift({
+    id: `audit-${generateUUID()}`,
+    admin_email: currentEmail,
+    admin_name: adminName,
+    action: 'SUBMISSION_MEMBER_REPLACED',
+    entity_type: 'DAILY_SUBMISSION',
+    description: `Replaced member in ${dateStr} submission: ${oldName} ➔ ${newMember.name}. Recalculated stats.`,
+    timestamp: new Date().toISOString()
+  });
+  saveAuditTrails(auditTrails);
+
+  updateState({
+    members: getMembers(),
+    auditTrails: getAuditTrails()
+  });
+
+  showToast(`${dateStr} তারিখে ${oldName}-এর পরিবর্তে ${newMember.name}-কে প্রতিস্থাপন করা হয়েছে!`, 'success');
+  return true;
+}
 
 export function updateMemberDetails(memberId, updates) {
   const members = getMembers();

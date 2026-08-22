@@ -398,21 +398,42 @@ export function calculateNameSimilarity(str1, str2) {
   // Levenshtein distance on canonical or ultra
   const s1 = canon1 || ultra1;
   const s2 = canon2 || ultra2;
-  const track = Array(s2.length + 1).fill(null).map(() => Array(s1.length + 1).fill(null));
-  for (let i = 0; i <= s1.length; i += 1) track[0][i] = i;
-  for (let j = 0; j <= s2.length; j += 1) track[j][0] = j;
-  for (let j = 1; j <= s2.length; j += 1) {
-    for (let i = 1; i <= s1.length; i += 1) {
-      const indicator = s1[i - 1] === s2[j - 1] ? 0 : 1;
-      track[j][i] = Math.min(
-        track[j][i - 1] + 1,
-        track[j - 1][i] + 1,
-        track[j - 1][i - 1] + indicator
+
+  if (s1 === s2) return 1.0;
+  if (!s1 || !s2) return 0;
+  
+  const len1 = s1.length;
+  const len2 = s2.length;
+  const maxLen = Math.max(len1, len2);
+  const lenDiff = Math.abs(len1 - len2);
+
+  // Early exit if length difference is too large to meet meaningful similarity threshold
+  if (lenDiff / maxLen > 0.55) {
+    return Math.max(0, 1 - (lenDiff / maxLen));
+  }
+
+  // Fast memory-efficient 1D array Levenshtein (prevents garbage collection lag on mobile)
+  let prevRow = new Array(len1 + 1);
+  let currRow = new Array(len1 + 1);
+
+  for (let i = 0; i <= len1; i++) prevRow[i] = i;
+
+  for (let j = 1; j <= len2; j++) {
+    currRow[0] = j;
+    const char2 = s2[j - 1];
+    for (let i = 1; i <= len1; i++) {
+      const cost = s1[i - 1] === char2 ? 0 : 1;
+      currRow[i] = Math.min(
+        currRow[i - 1] + 1,      // insertion
+        prevRow[i] + 1,          // deletion
+        prevRow[i - 1] + cost    // substitution
       );
     }
+    // Swap rows
+    for (let i = 0; i <= len1; i++) prevRow[i] = currRow[i];
   }
-  const distance = track[s2.length][s1.length];
-  const maxLen = Math.max(s1.length, s2.length);
+
+  const distance = prevRow[len1];
   return Math.max(0, 1 - (distance / maxLen));
 }
 
