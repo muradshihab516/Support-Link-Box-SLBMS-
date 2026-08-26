@@ -236,12 +236,25 @@ export function enqueueSyncJob(table, data) {
         ? data.map(item => mapLocalToDb(table, item)).filter(Boolean)
         : mapLocalToDb(table, data);
 
-      const { error } = await client.from(table).upsert(mappedData);
-      if (error) {
-        console.error(`Direct Sync error for ${table}:`, error);
+      let error = null;
+      try {
+        const res = await client.from(table).upsert(mappedData);
+        error = res.error;
+      } catch (networkErr) {
+        console.warn(`Direct Sync network failure for ${table} (working in offline mode):`, networkErr);
         updateState({ 
           supabaseConnectionStatus: 'error',
-          supabaseConnectionError: `সিঙ্ক ত্রুটি (${table}): ${error.message}`,
+          supabaseConnectionError: `নেটওয়ার্ক সংযোগ নেই বা অফলাইনে রয়েছে। ডাটা লোকাল স্টোরেজে সংরক্ষিত হয়েছে।`,
+          supabaseSyncing: false
+        });
+        return;
+      }
+
+      if (error) {
+        console.warn(`Direct Sync error for ${table}:`, error);
+        updateState({ 
+          supabaseConnectionStatus: 'error',
+          supabaseConnectionError: `সিঙ্ক ত্রুটি (${table}): ${error.message || 'Error'}`,
           supabaseSyncing: false
         });
       } else {
@@ -252,8 +265,12 @@ export function enqueueSyncJob(table, data) {
         });
       }
     } catch (err) {
-      console.error(`Direct Sync exception for ${table}:`, err);
-      updateState({ supabaseSyncing: false });
+      console.warn(`Direct Sync offline/exception for ${table}:`, err);
+      updateState({ 
+        supabaseConnectionStatus: 'error',
+        supabaseConnectionError: 'অফলাইন মোড: ডাটা লোকাল ব্রাউজারে সুরক্ষিত রয়েছে।',
+        supabaseSyncing: false 
+      });
     }
   }, 100); // 100ms debounce for rapid instant uploads
 }
@@ -313,9 +330,18 @@ async function handleRealtimeTableSync(table) {
 
     try {
       console.log(`Realtime Fetch: Re-aligning local table "${table}" with Supabase...`);
-      const { data, error } = await client.from(table).select('*');
+      let data, error;
+      try {
+        const res = await client.from(table).select('*');
+        data = res.data;
+        error = res.error;
+      } catch (fetchErr) {
+        console.warn(`Network offline or unreachable during realtime fetch for "${table}":`, fetchErr);
+        return;
+      }
+
       if (error) {
-        console.error(`Failed to fetch latest table "${table}" via realtime trigger:`, error);
+        console.warn(`Failed to fetch latest table "${table}" via realtime trigger:`, error);
         return;
       }
 
@@ -470,9 +496,15 @@ export async function testSupabaseConnection() {
   }
   updateState({ supabaseConnectionStatus: 'connecting', supabaseConnectionError: '' });
   try {
-    const { error: selectError } = await client.from('members').select('id').limit(1);
-    if (selectError) {
-      throw new Error(`Select Test Failed: ${selectError.message}`);
+    let selectRes, insertRes;
+    try {
+      selectRes = await client.from('members').select('id').limit(1);
+    } catch (netErr) {
+      throw new Error(`সার্ভারে সংযোগ পৌঁছায়নি (Failed to fetch): আপনার Supabase URL ও Key সঠিক আছে কিনা চেক করুন অথবা ইন্টারনেট কানেকশন যাচাই করুন।`);
+    }
+
+    if (selectRes && selectRes.error) {
+      throw new Error(`Select Test Failed: ${selectRes.error.message}`);
     }
 
     const testId = `test-conn-${Date.now()}`;
@@ -492,20 +524,29 @@ export async function testSupabaseConnection() {
       notes: 'temp_test_connection_record'
     };
 
-    const { error: insertError } = await client.from('members').insert([testMember]);
-    if (insertError) {
-      if (insertError.message.includes('row-level security') || insertError.code === '42501') {
-        throw new Error(`RLS_BLOCKED: ${insertError.message}`);
-      }
-      throw new Error(`Insert Test Failed: ${insertError.message}`);
+    try {
+      insertRes = await client.from('members').insert([testMember]);
+    } catch (netErr) {
+      throw new Error(`ডাটা ইনসার্ট করতে নেটওয়ার্ক সমস্যা হয়েছে (Failed to fetch): অনুগ্রহ করে Supabase সংযোগ ও RLS পারমিশন যাচাই করুন।`);
     }
 
-    await client.from('members').delete().eq('id', testId);
+    if (insertRes && insertRes.error) {
+      if (insertRes.error.message.includes('row-level security') || insertRes.error.code === '42501') {
+        throw new Error(`RLS_BLOCKED: ${insertRes.error.message}`);
+      }
+      throw new Error(`Insert Test Failed: ${insertRes.error.message}`);
+    }
+
+    try {
+      await client.from('members').delete().eq('id', testId);
+    } catch (delErr) {
+      console.warn('Test record cleanup note:', delErr);
+    }
 
     updateState({ supabaseConnectionStatus: 'connected', supabaseConnectionError: '' });
     return true;
   } catch (err) {
-    console.error('Supabase Connection Test Error:', err);
+    console.warn('Supabase Connection Test Result:', err.message || err);
     let friendlyError = err.message || 'Connection failed';
     if (err instanceof TypeError || friendlyError.includes('Failed to fetch') || friendlyError.includes('fetch')) {
       friendlyError = 'নেটওয়ার্ক সংযোগ ব্যর্থ হয়েছে! আপনার ইন্টারনেট অথবা প্রোভাইড করা Supabase URL ও Key সঠিক আছে কিনা চেক করুন।';

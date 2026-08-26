@@ -2056,78 +2056,78 @@ ${listText}
             </div>
           </div>
 
-          <!-- Beautifully styled premium stats cards on Homepage (Side-by-side horizontal scroll on mobile, grid on desktop) -->
+          <!-- Top Stat Summary Cards with 3D Glossy Edge & Glow -->
           <div class="overflow-x-auto scrollbar-none -mx-4 px-4 sm:mx-0 sm:px-0 pb-1 relative z-10">
             <div class="flex sm:grid sm:grid-cols-4 gap-3.5 min-w-[620px] sm:min-w-0 pb-2">
               
               <!-- Total Members Card -->
-              <div class="flex-1 min-w-[145px] bg-gradient-to-br from-slate-900/90 to-slate-950/90 border border-indigo-500/15 p-4 rounded-xl relative overflow-hidden group hover:border-indigo-500/35 transition duration-300 shadow-[0_4px_20px_rgba(0,0,0,0.3)]">
-                <div class="absolute -right-4 -bottom-4 w-16 h-16 bg-indigo-500/5 rounded-full blur-xl group-hover:bg-indigo-500/10 transition duration-300 pointer-events-none"></div>
+              <div class="flex-1 min-w-[145px] bg-gradient-to-br from-slate-900/95 via-slate-900/80 to-slate-950 border-t border-indigo-400/30 border-x border-b border-indigo-500/15 p-4 rounded-2xl relative overflow-hidden group hover:-translate-y-1 hover:border-indigo-500/40 transition-all duration-300 shadow-[0_8px_25px_-5px_rgba(0,0,0,0.5),0_0_15px_rgba(99,102,241,0.1)]">
+                <div class="absolute -right-4 -bottom-4 w-20 h-20 bg-indigo-500/10 rounded-full blur-xl group-hover:bg-indigo-500/20 transition duration-300 pointer-events-none"></div>
                 <div class="flex items-center justify-between gap-1">
                   <span class="text-[9px] font-extrabold text-slate-400 uppercase tracking-wider">মোট মেম্বার</span>
-                  <span class="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse shadow-[0_0_6px_#818cf8]"></span>
+                  <span class="w-2 h-2 rounded-full bg-indigo-400 animate-pulse shadow-[0_0_8px_#818cf8]"></span>
                 </div>
                 <div class="mt-3 flex items-center justify-between">
                   <div class="flex items-baseline gap-1">
                     <span class="text-2xl sm:text-3xl font-black text-white tracking-tight font-mono">${totalCount}</span>
                     <span class="text-[9px] text-indigo-400/80 font-bold">জন</span>
                   </div>
-                  <div class="w-7 h-7 rounded-lg bg-indigo-500/10 flex items-center justify-center text-indigo-400 border border-indigo-500/20">
-                    <i data-lucide="users" class="w-3.5 h-3.5"></i>
+                  <div class="w-8 h-8 rounded-xl bg-indigo-500/15 flex items-center justify-center text-indigo-400 border border-indigo-500/30 shadow-inner">
+                    <i data-lucide="users" class="w-4 h-4"></i>
                   </div>
                 </div>
               </div>
 
               <!-- Active Members Card -->
-              <div class="flex-1 min-w-[145px] bg-gradient-to-br from-slate-900/90 to-slate-950/90 border border-emerald-500/15 p-4 rounded-xl relative overflow-hidden group hover:border-emerald-500/35 transition duration-300 shadow-[0_4px_20px_rgba(0,0,0,0.3)]">
-                <div class="absolute -right-4 -bottom-4 w-16 h-16 bg-emerald-500/5 rounded-full blur-xl group-hover:bg-emerald-500/10 transition duration-300 pointer-events-none"></div>
+              <div class="flex-1 min-w-[145px] bg-gradient-to-br from-slate-900/95 via-slate-900/80 to-slate-950 border-t border-emerald-400/30 border-x border-b border-emerald-500/15 p-4 rounded-2xl relative overflow-hidden group hover:-translate-y-1 hover:border-emerald-500/40 transition-all duration-300 shadow-[0_8px_25px_-5px_rgba(0,0,0,0.5),0_0_15px_rgba(16,185,129,0.1)]">
+                <div class="absolute -right-4 -bottom-4 w-20 h-20 bg-emerald-500/10 rounded-full blur-xl group-hover:bg-emerald-500/20 transition duration-300 pointer-events-none"></div>
                 <div class="flex items-center justify-between gap-1">
                   <span class="text-[9px] font-extrabold text-slate-400 uppercase tracking-wider">সক্রিয় মেম্বার</span>
-                  <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_6px_#34d399]"></span>
+                  <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_8px_#34d399]"></span>
                 </div>
                 <div class="mt-3 flex items-center justify-between">
                   <div class="flex items-baseline gap-1">
                     <span class="text-2xl sm:text-3xl font-black text-emerald-400 tracking-tight font-mono">${activeCount}</span>
                     <span class="text-[9px] text-emerald-400/80 font-bold">জন</span>
                   </div>
-                  <div class="w-7 h-7 rounded-lg bg-emerald-500/10 flex items-center justify-center text-emerald-400 border border-emerald-500/20">
-                    <i data-lucide="shield-check" class="w-3.5 h-3.5"></i>
+                  <div class="w-8 h-8 rounded-xl bg-emerald-500/15 flex items-center justify-center text-emerald-400 border border-emerald-500/30 shadow-inner">
+                    <i data-lucide="shield-check" class="w-4 h-4"></i>
                   </div>
                 </div>
               </div>
 
               <!-- Inactive Members Card -->
-              <div class="flex-1 min-w-[145px] bg-gradient-to-br from-slate-900/90 to-slate-950/90 border border-rose-500/15 p-4 rounded-xl relative overflow-hidden group hover:border-rose-500/35 transition duration-300 shadow-[0_4px_20px_rgba(0,0,0,0.3)]">
-                <div class="absolute -right-4 -bottom-4 w-16 h-16 bg-rose-500/5 rounded-full blur-xl group-hover:bg-rose-500/10 transition duration-300 pointer-events-none"></div>
+              <div class="flex-1 min-w-[145px] bg-gradient-to-br from-slate-900/95 via-slate-900/80 to-slate-950 border-t border-rose-400/30 border-x border-b border-rose-500/15 p-4 rounded-2xl relative overflow-hidden group hover:-translate-y-1 hover:border-rose-500/40 transition-all duration-300 shadow-[0_8px_25px_-5px_rgba(0,0,0,0.5),0_0_15px_rgba(244,63,94,0.1)]">
+                <div class="absolute -right-4 -bottom-4 w-20 h-20 bg-rose-500/10 rounded-full blur-xl group-hover:bg-rose-500/20 transition duration-300 pointer-events-none"></div>
                 <div class="flex items-center justify-between gap-1">
                   <span class="text-[9px] font-extrabold text-slate-400 uppercase tracking-wider">নিষ্ক্রিয় মেম্বার</span>
-                  <span class="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse shadow-[0_0_6px_#f43f5e]"></span>
+                  <span class="w-2 h-2 rounded-full bg-rose-400 animate-pulse shadow-[0_0_8px_#f43f5e]"></span>
                 </div>
                 <div class="mt-3 flex items-center justify-between">
                   <div class="flex items-baseline gap-1">
                     <span class="text-2xl sm:text-3xl font-black text-rose-400 tracking-tight font-mono">${inactiveCount}</span>
                     <span class="text-[9px] text-rose-400/80 font-bold">জন</span>
                   </div>
-                  <div class="w-7 h-7 rounded-lg bg-rose-500/10 flex items-center justify-center text-rose-400 border border-rose-500/20">
-                    <i data-lucide="alert-triangle" class="w-3.5 h-3.5"></i>
+                  <div class="w-8 h-8 rounded-xl bg-rose-500/15 flex items-center justify-center text-rose-400 border border-rose-500/30 shadow-inner">
+                    <i data-lucide="alert-triangle" class="w-4 h-4"></i>
                   </div>
                 </div>
               </div>
 
               <!-- Diamond Members Card -->
-              <div class="flex-1 min-w-[145px] bg-gradient-to-br from-slate-900/90 to-slate-950/90 border border-cyan-500/15 p-4 rounded-xl relative overflow-hidden group hover:border-cyan-500/35 transition duration-300 shadow-[0_4px_20px_rgba(0,0,0,0.3)]">
-                <div class="absolute -right-4 -bottom-4 w-16 h-16 bg-cyan-500/5 rounded-full blur-xl group-hover:bg-cyan-500/10 transition duration-300 pointer-events-none"></div>
+              <div class="flex-1 min-w-[145px] bg-gradient-to-br from-slate-900/95 via-slate-900/80 to-slate-950 border-t border-cyan-400/30 border-x border-b border-cyan-500/15 p-4 rounded-2xl relative overflow-hidden group hover:-translate-y-1 hover:border-cyan-500/40 transition-all duration-300 shadow-[0_8px_25px_-5px_rgba(0,0,0,0.5),0_0_15px_rgba(34,211,238,0.1)]">
+                <div class="absolute -right-4 -bottom-4 w-20 h-20 bg-cyan-500/10 rounded-full blur-xl group-hover:bg-cyan-500/20 transition duration-300 pointer-events-none"></div>
                 <div class="flex items-center justify-between gap-1">
                   <span class="text-[9px] font-extrabold text-slate-400 uppercase tracking-wider">ডায়মন্ড মেম্বার</span>
-                  <span class="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse shadow-[0_0_6px_#22d3ee]"></span>
+                  <span class="w-2 h-2 rounded-full bg-cyan-400 animate-pulse shadow-[0_0_8px_#22d3ee]"></span>
                 </div>
                 <div class="mt-3 flex items-center justify-between">
                   <div class="flex items-baseline gap-1">
                     <span class="text-2xl sm:text-3xl font-black text-cyan-400 tracking-tight font-mono">${diamondCount}</span>
                     <span class="text-[9px] text-cyan-400/80 font-bold">জন</span>
                   </div>
-                  <div class="w-7 h-7 rounded-lg bg-cyan-500/10 flex items-center justify-center text-cyan-400 border border-cyan-500/20">
-                    <i data-lucide="gem" class="w-3.5 h-3.5"></i>
+                  <div class="w-8 h-8 rounded-xl bg-cyan-500/15 flex items-center justify-center text-cyan-400 border border-cyan-500/30 shadow-inner">
+                    <i data-lucide="gem" class="w-4 h-4"></i>
                   </div>
                 </div>
               </div>
@@ -2137,21 +2137,27 @@ ${listText}
 
           <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
             
-            <!-- Left: Active Leaderboards list -->
-            <div class="bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-4">
-              <div class="flex flex-col sm:flex-row justify-between sm:items-center border-b border-slate-800 pb-3 gap-2">
-                <div class="flex items-center gap-2">
-                  <div class="w-8 h-8 rounded-lg bg-indigo-500/10 flex items-center justify-center text-indigo-400">
-                    <i data-lucide="flame" class="w-4.5 h-4.5 animate-pulse"></i>
+            <!-- Left: 3D Active Champions Leaderboard -->
+            <div class="bg-gradient-to-b from-slate-900/95 to-slate-950 border border-slate-800 p-5 sm:p-6 rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] relative overflow-hidden space-y-5">
+              
+              <!-- Ambient Spotlight Aura -->
+              <div class="absolute -top-16 left-1/2 -translate-x-1/2 w-72 h-36 bg-indigo-500/15 rounded-full blur-3xl pointer-events-none"></div>
+
+              <div class="flex flex-col sm:flex-row justify-between sm:items-center border-b border-slate-800/80 pb-4 gap-2 relative z-10">
+                <div class="flex items-center gap-2.5">
+                  <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500/20 to-purple-500/10 flex items-center justify-center text-indigo-400 border border-indigo-500/30 shadow-md">
+                    <i data-lucide="flame" class="w-5 h-5 text-amber-400 animate-pulse"></i>
                   </div>
                   <div>
-                    <h3 class="font-bold text-slate-100 text-sm uppercase tracking-wide">১. সক্রিয় মেম্বার লিডারবোর্ড (Active)</h3>
-                    <p class="text-[10px] text-slate-500">সবচেয়ে বেশি একটিভ ও পয়েন্ট অর্জনকারী মেম্বারদের তালিকা</p>
+                    <h3 class="font-black text-slate-100 text-sm tracking-wide uppercase flex items-center gap-1.5">
+                      ১. সক্রিয় মেম্বার লিডারবোর্ড (Active 3D Podium)
+                    </h3>
+                    <p class="text-[10px] text-slate-400 font-medium">সবচেয়ে বেশি ধারাবাহিক ও পয়েন্ট অর্জনকারী মেম্বারগণ</p>
                   </div>
                 </div>
 
                 <div>
-                  <select id="leaderboard-active-filter" class="bg-transparent border-0 text-[11px] text-slate-400 focus:outline-none cursor-pointer font-medium">
+                  <select id="leaderboard-active-filter" class="bg-slate-950/80 border border-slate-800 text-[11px] text-indigo-300 px-3 py-1.5 rounded-xl focus:outline-none focus:border-indigo-500 cursor-pointer font-bold shadow-sm">
                     <option value="1" ${state.leaderboardActiveThreshold === 1 ? 'selected' : ''}>১+ পয়েন্ট বা তার বেশি</option>
                     <option value="100" ${state.leaderboardActiveThreshold === 100 ? 'selected' : ''}>১০০+ (Silver Tier)</option>
                     <option value="300" ${state.leaderboardActiveThreshold === 300 ? 'selected' : ''}>৩০০+ (Gold Tier)</option>
@@ -2160,82 +2166,107 @@ ${listText}
                 </div>
               </div>
 
-              <!-- Top 3 Podium for Active Members -->
-              <div class="grid grid-cols-3 gap-2 items-end pt-2 pb-5 border-b border-slate-850/60">
+              <!-- 3D Stadium Championship Podium for Active Members -->
+              <div class="podium-3d-container pt-3 pb-6 relative z-10">
                 
-                <!-- 2nd Place (Silver Medal) -->
-                <div class="flex flex-col items-center space-y-1.5 text-center pb-2.5 bg-slate-950/20 border border-slate-850 rounded-xl p-2 h-36 justify-end relative cursor-pointer" ${topActive[1] ? `data-open-profile="${topActive[1].id}"` : ''}>
-                  <span class="absolute top-1 left-2 text-[10px] text-slate-400 font-bold font-mono">#2</span>
-                  <div class="relative">
-                    <div class="w-10 h-10 rounded-full bg-slate-850 border-2 border-slate-400 flex items-center justify-center text-slate-300 font-bold text-xs shadow-md">
-                      🥈
-                    </div>
-                  </div>
-                  <div class="w-full">
-                    <p class="text-[10px] font-black text-slate-200 truncate">${topActive[1] ? topActive[1].name : '---'}</p>
-                    <p class="text-[8px] text-slate-500 font-bold font-mono truncate">${topActive[1] ? '🔥 ' + topActive[1].current_streak + ' d streak' : 'খালি স্লট'}</p>
-                    <div class="mt-1 bg-slate-400/10 border border-slate-400/20 text-slate-300 rounded px-1.5 py-0.5 text-[9px] font-black inline-block">
-                      ★ ${topActive[1] ? topActive[1].total_points : '0'}
-                    </div>
-                  </div>
-                </div>
+                <!-- Floor Shadow Ring -->
+                <div class="absolute bottom-2 left-1/2 -translate-x-1/2 w-4/5 h-8 bg-black/60 rounded-full blur-xl pointer-events-none"></div>
 
-                <!-- 1st Place (Gold Medal & Crown) -->
-                <div class="flex flex-col items-center space-y-1.5 text-center pb-3.5 bg-gradient-to-t from-yellow-500/5 to-slate-950/30 border-2 border-yellow-500/40 rounded-2xl p-2 h-44 justify-end relative shadow-[0_0_15px_rgba(234,179,8,0.15)] cursor-pointer" ${topActive[0] ? `data-open-profile="${topActive[0].id}"` : ''}>
-                  <div class="absolute -top-3 text-yellow-400 text-sm animate-bounce">👑</div>
-                  <span class="absolute top-1 left-2 text-[10px] text-yellow-400 font-bold font-mono">#1</span>
-                  <div class="relative">
-                    <div class="w-12 h-12 rounded-full bg-yellow-500/10 border-2 border-yellow-400 flex items-center justify-center text-yellow-400 font-bold text-sm shadow-lg shadow-yellow-500/10">
-                      🥇
+                <div class="grid grid-cols-3 gap-2.5 sm:gap-4 items-end max-w-lg mx-auto">
+                  
+                  <!-- #2 Place (Silver 3D Pedestal) -->
+                  <div class="podium-3d-card flex flex-col items-center justify-end h-44 relative cursor-pointer group" ${topActive[1] ? `data-open-profile="${topActive[1].id}"` : ''} title="Click to view #2 Profile">
+                    
+                    <!-- Floating 3D Silver Medal Coin -->
+                    <div class="mb-2 relative flex flex-col items-center">
+                      <div class="w-11 h-11 sm:w-12 sm:h-12 rounded-full medal-3d-silver flex items-center justify-center text-white font-black text-xs sm:text-sm border border-white/50 group-hover:scale-110 transition-transform duration-300">
+                        🥈
+                      </div>
+                      <span class="text-[9px] font-black text-slate-300 font-mono mt-1 bg-slate-900/90 border border-slate-700 px-2 py-0.5 rounded-full shadow">#2 Silver</span>
                     </div>
-                  </div>
-                  <div class="w-full">
-                    <p class="text-xs font-black text-white truncate">${topActive[0] ? topActive[0].name : '---'}</p>
-                    <p class="text-[8px] text-yellow-400 font-bold font-mono truncate">${topActive[0] ? '🔥 ' + topActive[0].current_streak + ' d streak' : 'খালি স্লট'}</p>
-                    <div class="mt-1 bg-yellow-400 text-slate-950 rounded-xl px-2 py-0.5 text-[9px] font-black inline-block shadow-md">
-                      ★ ${topActive[0] ? topActive[0].total_points : '0'}
-                    </div>
-                  </div>
-                </div>
 
-                <!-- 3rd Place (Bronze Medal) -->
-                <div class="flex flex-col items-center space-y-1.5 text-center pb-2.5 bg-slate-950/20 border border-slate-850 rounded-xl p-2 h-32 justify-end relative cursor-pointer" ${topActive[2] ? `data-open-profile="${topActive[2].id}"` : ''}>
-                  <span class="absolute top-1 left-2 text-[10px] text-amber-700 font-bold font-mono">#3</span>
-                  <div class="relative">
-                    <div class="w-10 h-10 rounded-full bg-slate-850 border-2 border-amber-600 flex items-center justify-center text-amber-500 font-bold text-xs shadow-md">
-                      🥉
+                    <!-- 3D Pedestal Column -->
+                    <div class="w-full bg-gradient-to-b from-slate-700/50 via-slate-900/90 to-slate-950 border-t-2 border-slate-300/80 border-x border-slate-800/80 rounded-t-2xl p-2.5 text-center shadow-[0_10px_25px_rgba(0,0,0,0.6),inset_0_1px_1px_rgba(255,255,255,0.2)]">
+                      <p class="text-[11px] font-black text-slate-100 truncate group-hover:text-indigo-300 transition">${topActive[1] ? topActive[1].name : '---'}</p>
+                      <p class="text-[9px] text-indigo-400/90 font-bold font-mono truncate mt-0.5">${topActive[1] ? '🔥 ' + topActive[1].current_streak + 'd streak' : 'খালি স্লট'}</p>
+                      
+                      <div class="mt-2 w-full bg-slate-800/90 border border-slate-700 text-slate-200 rounded-lg py-1 px-1 text-[10px] font-black shadow-inner truncate">
+                        ★ ${topActive[1] ? topActive[1].total_points + ' Pts' : '0 Pts'}
+                      </div>
                     </div>
                   </div>
-                  <div class="w-full">
-                    <p class="text-[10px] font-black text-slate-200 truncate">${topActive[2] ? topActive[2].name : '---'}</p>
-                    <p class="text-[8px] text-slate-500 font-bold font-mono truncate">${topActive[2] ? '🔥 ' + topActive[2].current_streak + ' d streak' : 'খালি স্লট'}</p>
-                    <div class="mt-1 bg-amber-600/10 border border-amber-600/20 text-amber-500 rounded px-1.5 py-0.5 text-[9px] font-black inline-block">
-                      ★ ${topActive[2] ? topActive[2].total_points : '0'}
-                    </div>
-                  </div>
-                </div>
 
+                  <!-- #1 Place (Gold 3D Champion Pedestal - Tallest Center) -->
+                  <div class="podium-3d-card flex flex-col items-center justify-end h-56 relative cursor-pointer group" ${topActive[0] ? `data-open-profile="${topActive[0].id}"` : ''} title="Click to view #1 Champion Profile">
+                    
+                    <!-- 3D Floating Crown & Ambient Glow -->
+                    <div class="absolute -top-7 text-yellow-400 text-xl sm:text-2xl animate-bounce drop-shadow-[0_4px_10px_rgba(234,179,8,0.8)] z-20">👑</div>
+                    <div class="absolute top-2 w-20 h-20 bg-yellow-400/20 rounded-full blur-xl animate-pulse-glow pointer-events-none"></div>
+
+                    <!-- Floating 3D Gold Champion Medal Coin -->
+                    <div class="mb-2 relative flex flex-col items-center z-10">
+                      <div class="w-14 h-14 sm:w-16 sm:h-16 rounded-full medal-3d-gold flex items-center justify-center text-slate-950 font-black text-base sm:text-lg border-2 border-yellow-200 group-hover:scale-110 transition-transform duration-300 shadow-[0_0_20px_rgba(234,179,8,0.5)]">
+                        🥇
+                      </div>
+                      <span class="text-[9px] font-black text-yellow-300 font-mono mt-1 bg-yellow-950/90 border border-yellow-500/60 px-2.5 py-0.5 rounded-full shadow-lg">#1 Champion</span>
+                    </div>
+
+                    <!-- 3D Gold Pedestal Column -->
+                    <div class="w-full bg-gradient-to-b from-yellow-500/25 via-slate-900/95 to-slate-950 border-t-2 border-yellow-300 border-x border-yellow-500/30 rounded-t-2xl p-2.5 text-center shadow-[0_15px_35px_rgba(234,179,8,0.25),inset_0_2px_4px_rgba(255,255,255,0.3)] relative">
+                      <p class="text-xs sm:text-sm font-black text-white truncate group-hover:text-yellow-300 transition drop-shadow">${topActive[0] ? topActive[0].name : '---'}</p>
+                      <p class="text-[9px] sm:text-[10px] text-yellow-400 font-bold font-mono truncate mt-0.5">${topActive[0] ? '🔥 ' + topActive[0].current_streak + ' days streak' : 'খালি স্লট'}</p>
+                      
+                      <div class="mt-2 w-full bg-gradient-to-r from-yellow-500 to-amber-500 text-slate-950 rounded-xl py-1.5 px-1 text-[11px] font-black shadow-[0_4px_12px_rgba(234,179,8,0.4)] truncate">
+                        ★ ${topActive[0] ? topActive[0].total_points + ' Points' : '0 Pts'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- #3 Place (Bronze 3D Pedestal) -->
+                  <div class="podium-3d-card flex flex-col items-center justify-end h-40 relative cursor-pointer group" ${topActive[2] ? `data-open-profile="${topActive[2].id}"` : ''} title="Click to view #3 Profile">
+                    
+                    <!-- Floating 3D Bronze Medal Coin -->
+                    <div class="mb-2 relative flex flex-col items-center">
+                      <div class="w-11 h-11 sm:w-12 sm:h-12 rounded-full medal-3d-bronze flex items-center justify-center text-white font-black text-xs sm:text-sm border border-amber-200/50 group-hover:scale-110 transition-transform duration-300">
+                        🥉
+                      </div>
+                      <span class="text-[9px] font-black text-amber-400 font-mono mt-1 bg-slate-900/90 border border-amber-700 px-2 py-0.5 rounded-full shadow">#3 Bronze</span>
+                    </div>
+
+                    <!-- 3D Bronze Pedestal Column -->
+                    <div class="w-full bg-gradient-to-b from-amber-700/40 via-slate-900/90 to-slate-950 border-t-2 border-amber-500/80 border-x border-slate-800/80 rounded-t-2xl p-2.5 text-center shadow-[0_10px_25px_rgba(0,0,0,0.6),inset_0_1px_1px_rgba(255,255,255,0.2)]">
+                      <p class="text-[11px] font-black text-slate-100 truncate group-hover:text-amber-300 transition">${topActive[2] ? topActive[2].name : '---'}</p>
+                      <p class="text-[9px] text-amber-400/90 font-bold font-mono truncate mt-0.5">${topActive[2] ? '🔥 ' + topActive[2].current_streak + 'd streak' : 'খালি স্লট'}</p>
+                      
+                      <div class="mt-2 w-full bg-slate-800/90 border border-amber-800/50 text-amber-300 rounded-lg py-1 px-1 text-[10px] font-black shadow-inner truncate">
+                        ★ ${topActive[2] ? topActive[2].total_points + ' Pts' : '0 Pts'}
+                      </div>
+                    </div>
+                  </div>
+
+                </div>
               </div>
 
+              <!-- 3D Ranked List Items -->
               <div class="space-y-2 max-h-[320px] overflow-y-auto pr-1">
                 ${activeList.length > 0 ? activeList.map((m, idx) => `
-                  <div class="flex items-center justify-between bg-slate-950/40 hover:bg-slate-950 border border-slate-850 hover:border-slate-800 p-3 rounded-xl transition duration-150 cursor-pointer group" data-open-profile="${m.id}" title="Click to view Member Profile">
+                  <div class="flex items-center justify-between bg-slate-950/60 hover:bg-slate-900/90 border border-slate-850 hover:border-indigo-500/40 p-3 rounded-2xl transition duration-200 cursor-pointer group shadow-sm hover:shadow-md hover:-translate-y-0.5" data-open-profile="${m.id}" title="Click to view Member Profile">
                     <div class="flex items-center gap-3">
-                      <div class="w-6 h-6 rounded-full bg-slate-950 border border-slate-850 flex items-center justify-center text-[10px] font-bold ${
-                        idx === 0 ? 'text-yellow-400 bg-yellow-400/5' :
-                        idx === 1 ? 'text-slate-300 bg-slate-300/5' :
-                        idx === 2 ? 'text-amber-600 bg-amber-600/5' : 'text-slate-500'
+                      <div class="w-7 h-7 rounded-xl border flex items-center justify-center text-xs font-black shadow-inner ${
+                        idx === 0 ? 'bg-yellow-500/20 text-yellow-300 border-yellow-500/40 shadow-yellow-500/10' :
+                        idx === 1 ? 'bg-slate-300/20 text-slate-200 border-slate-400/40' :
+                        idx === 2 ? 'bg-amber-600/20 text-amber-300 border-amber-600/40' : 'bg-slate-900 text-slate-400 border-slate-800'
                       }">${idx + 1}</div>
                       <div>
-                        <p class="text-xs font-bold text-slate-200 group-hover:text-indigo-400 transition">${m.name}</p>
-                        <p class="text-[9px] text-slate-500 font-medium">Lvl: ${m.level} | ID: #${m.member_number}</p>
+                        <p class="text-xs font-black text-slate-200 group-hover:text-indigo-300 transition">${m.name}</p>
+                        <p class="text-[9px] text-slate-400 font-semibold font-mono">Lvl: ${m.level} • ID: #${m.member_number}</p>
                       </div>
                     </div>
                     <div class="text-right">
-                      <p class="text-xs font-extrabold text-indigo-400 flex items-center justify-end gap-1">
-                        <span>★</span> ${m.total_points}
+                      <p class="text-xs font-black text-indigo-400 flex items-center justify-end gap-1 font-mono">
+                        <span class="text-amber-400">★</span> ${m.total_points} Pts
                       </p>
-                      <p class="text-[10px] text-slate-500 mt-0.5 flex items-center justify-end gap-1 font-mono">
+                      <p class="text-[10px] text-slate-400 mt-0.5 flex items-center justify-end gap-1 font-mono">
                         🔥 ${m.current_streak} days streak
                       </p>
                     </div>
@@ -2246,21 +2277,27 @@ ${listText}
               </div>
             </div>
 
-            <!-- Right: Inactive Leaderboards list -->
-            <div class="bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-4">
-              <div class="flex flex-col sm:flex-row justify-between sm:items-center border-b border-slate-800 pb-3 gap-2">
-                <div class="flex items-center gap-2">
-                  <div class="w-8 h-8 rounded-lg bg-rose-500/10 flex items-center justify-center text-rose-400">
-                    <i data-lucide="shield-alert" class="w-4.5 h-4.5 text-rose-400"></i>
+            <!-- Right: 3D Inactive Warning Leaderboard -->
+            <div class="bg-gradient-to-b from-slate-900/95 to-slate-950 border border-slate-800 p-5 sm:p-6 rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] relative overflow-hidden space-y-5">
+              
+              <!-- Ambient Red Warning Aura -->
+              <div class="absolute -top-16 left-1/2 -translate-x-1/2 w-72 h-36 bg-rose-500/15 rounded-full blur-3xl pointer-events-none"></div>
+
+              <div class="flex flex-col sm:flex-row justify-between sm:items-center border-b border-slate-800/80 pb-4 gap-2 relative z-10">
+                <div class="flex items-center gap-2.5">
+                  <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-rose-500/20 to-orange-500/10 flex items-center justify-center text-rose-400 border border-rose-500/30 shadow-md">
+                    <i data-lucide="shield-alert" class="w-5 h-5 text-rose-400 animate-pulse"></i>
                   </div>
                   <div>
-                    <h3 class="font-bold text-slate-100 text-sm uppercase tracking-wide">২. নিষ্ক্রিয় মেম্বার লিডারবোর্ড (Inactive)</h3>
-                    <p class="text-[10px] text-slate-500">সবচেয়ে বেশি দিন ধরে লিংক প্রদান না করা নিষ্ক্রিয় মেম্বারগণ</p>
+                    <h3 class="font-black text-slate-100 text-sm tracking-wide uppercase flex items-center gap-1.5">
+                      ২. নিষ্ক্রিয় মেম্বার লিডারবোর্ড (Warning 3D Podium)
+                    </h3>
+                    <p class="text-[10px] text-slate-400 font-medium">সবচেয়ে বেশি দিন লিংক না দেওয়া মেম্বারগণ</p>
                   </div>
                 </div>
 
                 <div>
-                  <select id="leaderboard-inactive-filter" class="bg-transparent border-0 text-[11px] text-slate-400 focus:outline-none cursor-pointer font-medium">
+                  <select id="leaderboard-inactive-filter" class="bg-slate-950/80 border border-slate-800 text-[11px] text-rose-300 px-3 py-1.5 rounded-xl focus:outline-none focus:border-rose-500 cursor-pointer font-bold shadow-sm">
                     <option value="3" ${state.leaderboardInactiveThreshold === 3 ? 'selected' : ''}>৩+ দিন ইনেক্টিভ</option>
                     <option value="5" ${state.leaderboardInactiveThreshold === 5 ? 'selected' : ''}>৫+ দিন ইনেক্টিভ</option>
                     <option value="7" ${state.leaderboardInactiveThreshold === 7 ? 'selected' : ''}>৭+ দিন (চূড়ান্ত ওয়ার্নিং)</option>
@@ -2269,76 +2306,101 @@ ${listText}
                 </div>
               </div>
 
-              <!-- Top 3 Inactive Warning Podium -->
-              <div class="grid grid-cols-3 gap-2 items-end pt-2 pb-5 border-b border-slate-850/60">
+              <!-- 3D Stadium Inactive Warning Podium -->
+              <div class="podium-3d-container pt-3 pb-6 relative z-10">
                 
-                <!-- 2nd Most Inactive -->
-                <div class="flex flex-col items-center space-y-1.5 text-center pb-2.5 bg-slate-950/20 border border-slate-850 rounded-xl p-2 h-36 justify-end relative cursor-pointer" ${topInactive[1] ? `data-open-profile="${topInactive[1].id}"` : ''}>
-                  <span class="absolute top-1 left-2 text-[10px] text-rose-400 font-bold font-mono">#2</span>
-                  <div class="relative">
-                    <div class="w-10 h-10 rounded-full bg-slate-900 border-2 border-rose-500/50 flex items-center justify-center text-rose-400 font-bold text-xs shadow-md">
-                      ⚠️
-                    </div>
-                  </div>
-                  <div class="w-full">
-                    <p class="text-[10px] font-black text-slate-200 truncate">${topInactive[1] ? topInactive[1].name : '---'}</p>
-                    <p class="text-[8px] text-rose-400/80 font-bold font-mono truncate">${topInactive[1] ? 'Level: ' + topInactive[1].level : 'খালি স্লট'}</p>
-                    <div class="mt-1 bg-rose-500/10 border border-rose-500/20 text-rose-400 rounded px-1.5 py-0.5 text-[9px] font-black inline-block">
-                      ${topInactive[1] ? topInactive[1].consecutive_inactive_days + ' দিন' : '0 দিন'}
-                    </div>
-                  </div>
-                </div>
+                <!-- Floor Shadow Ring -->
+                <div class="absolute bottom-2 left-1/2 -translate-x-1/2 w-4/5 h-8 bg-black/60 rounded-full blur-xl pointer-events-none"></div>
 
-                <!-- 1st Most Inactive -->
-                <div class="flex flex-col items-center space-y-1.5 text-center pb-3.5 bg-gradient-to-t from-rose-950/15 to-slate-950/30 border-2 border-rose-600/50 rounded-2xl p-2 h-44 justify-end relative shadow-[0_0_15px_rgba(239,68,68,0.15)] cursor-pointer" ${topInactive[0] ? `data-open-profile="${topInactive[0].id}"` : ''}>
-                  <div class="absolute -top-3 text-rose-500 text-[9px] font-bold bg-rose-950/90 border border-rose-500/40 px-2 py-0.5 rounded-full uppercase tracking-wider animate-pulse">💀 Danger</div>
-                  <span class="absolute top-1 left-2 text-[10px] text-rose-500 font-bold font-mono">#1</span>
-                  <div class="relative">
-                    <div class="w-12 h-12 rounded-full bg-rose-500/10 border-2 border-rose-500 flex items-center justify-center text-rose-500 font-bold text-sm shadow-lg shadow-rose-500/10">
-                      🚨
+                <div class="grid grid-cols-3 gap-2.5 sm:gap-4 items-end max-w-lg mx-auto">
+                  
+                  <!-- #2 Most Inactive Pedestal -->
+                  <div class="podium-3d-card flex flex-col items-center justify-end h-44 relative cursor-pointer group" ${topInactive[1] ? `data-open-profile="${topInactive[1].id}"` : ''} title="Click to view #2 Inactive Profile">
+                    
+                    <!-- Floating 3D Warning Beacon -->
+                    <div class="mb-2 relative flex flex-col items-center">
+                      <div class="w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-slate-900 border-2 border-rose-400/60 shadow-[0_6px_16px_rgba(244,63,94,0.35)] flex items-center justify-center text-rose-400 font-black text-sm group-hover:scale-110 transition-transform duration-300">
+                        ⚠️
+                      </div>
+                      <span class="text-[9px] font-black text-rose-300 font-mono mt-1 bg-slate-900/90 border border-rose-800 px-2 py-0.5 rounded-full shadow">#2 Warning</span>
                     </div>
-                  </div>
-                  <div class="w-full">
-                    <p class="text-xs font-black text-white truncate">${topInactive[0] ? topInactive[0].name : '---'}</p>
-                    <p class="text-[8px] text-rose-400 font-bold font-mono truncate">${topInactive[0] ? 'Level: ' + topInactive[0].level : 'খালি স্লট'}</p>
-                    <div class="mt-1 bg-rose-600 text-white rounded-xl px-2 py-0.5 text-[9px] font-black inline-block shadow-md">
-                      ${topInactive[0] ? topInactive[0].consecutive_inactive_days + ' দিন ' : '0 দিন'}
-                    </div>
-                  </div>
-                </div>
 
-                <!-- 3rd Most Inactive -->
-                <div class="flex flex-col items-center space-y-1.5 text-center pb-2.5 bg-slate-950/20 border border-slate-850 rounded-xl p-2 h-32 justify-end relative cursor-pointer" ${topInactive[2] ? `data-open-profile="${topInactive[2].id}"` : ''}>
-                  <span class="absolute top-1 left-2 text-[10px] text-orange-400 font-bold font-mono">#3</span>
-                  <div class="relative">
-                    <div class="w-10 h-10 rounded-full bg-slate-900 border-2 border-orange-500/50 flex items-center justify-center text-orange-400 font-bold text-xs shadow-md">
-                      💤
+                    <!-- 3D Pedestal Column -->
+                    <div class="w-full bg-gradient-to-b from-rose-950/40 via-slate-900/90 to-slate-950 border-t-2 border-rose-500/70 border-x border-slate-800/80 rounded-t-2xl p-2.5 text-center shadow-[0_10px_25px_rgba(0,0,0,0.6)]">
+                      <p class="text-[11px] font-black text-slate-100 truncate group-hover:text-rose-300 transition">${topInactive[1] ? topInactive[1].name : '---'}</p>
+                      <p class="text-[9px] text-slate-400 font-bold font-mono truncate mt-0.5">${topInactive[1] ? 'Level: ' + topInactive[1].level : 'খালি স্লট'}</p>
+                      
+                      <div class="mt-2 w-full bg-rose-500/15 border border-rose-500/30 text-rose-300 rounded-lg py-1 px-1 text-[10px] font-black shadow-inner truncate">
+                        ${topInactive[1] ? topInactive[1].consecutive_inactive_days + ' দিন' : '0 দিন'}
+                      </div>
                     </div>
                   </div>
-                  <div class="w-full">
-                    <p class="text-[10px] font-black text-slate-200 truncate">${topInactive[2] ? topInactive[2].name : '---'}</p>
-                    <p class="text-[8px] text-orange-400/80 font-bold font-mono truncate">${topInactive[2] ? 'Level: ' + topInactive[2].level : 'খালি স্লট'}</p>
-                    <div class="mt-1 bg-orange-500/10 border border-orange-500/20 text-orange-400 rounded px-1.5 py-0.5 text-[9px] font-black inline-block">
-                      ${topInactive[2] ? topInactive[2].consecutive_inactive_days + ' দিন' : '0 দিন'}
-                    </div>
-                  </div>
-                </div>
 
+                  <!-- #1 Most Inactive Pedestal (Danger Stage) -->
+                  <div class="podium-3d-card flex flex-col items-center justify-end h-56 relative cursor-pointer group" ${topInactive[0] ? `data-open-profile="${topInactive[0].id}"` : ''} title="Click to view #1 Most Inactive Profile">
+                    
+                    <!-- 3D Floating Danger Badge -->
+                    <div class="absolute -top-7 text-[9px] font-black bg-gradient-to-r from-rose-600 to-red-600 text-white border border-rose-300 px-2.5 py-0.5 rounded-full uppercase tracking-wider animate-pulse shadow-[0_0_15px_rgba(244,63,94,0.6)] z-20">💀 Danger #1</div>
+                    <div class="absolute top-2 w-20 h-20 bg-rose-500/20 rounded-full blur-xl animate-pulse-glow pointer-events-none"></div>
+
+                    <!-- Floating 3D Danger Medal Coin -->
+                    <div class="mb-2 relative flex flex-col items-center z-10">
+                      <div class="w-14 h-14 sm:w-16 sm:h-16 rounded-full medal-3d-danger flex items-center justify-center text-white font-black text-base sm:text-lg border-2 border-rose-200 group-hover:scale-110 transition-transform duration-300 shadow-[0_0_20px_rgba(244,63,94,0.5)]">
+                        🚨
+                      </div>
+                      <span class="text-[9px] font-black text-rose-200 font-mono mt-1 bg-rose-950/90 border border-rose-500/60 px-2.5 py-0.5 rounded-full shadow-lg">Critical Risk</span>
+                    </div>
+
+                    <!-- 3D Danger Pedestal Column -->
+                    <div class="w-full bg-gradient-to-b from-rose-600/30 via-slate-900/95 to-slate-950 border-t-2 border-rose-400 border-x border-rose-500/30 rounded-t-2xl p-2.5 text-center shadow-[0_15px_35px_rgba(244,63,94,0.25)] relative">
+                      <p class="text-xs sm:text-sm font-black text-white truncate group-hover:text-rose-300 transition drop-shadow">${topInactive[0] ? topInactive[0].name : '---'}</p>
+                      <p class="text-[9px] sm:text-[10px] text-rose-300 font-bold font-mono truncate mt-0.5">${topInactive[0] ? 'Level: ' + topInactive[0].level : 'খালি স্লট'}</p>
+                      
+                      <div class="mt-2 w-full bg-gradient-to-r from-rose-600 to-red-600 text-white rounded-xl py-1.5 px-1 text-[11px] font-black shadow-[0_4px_12px_rgba(244,63,94,0.4)] truncate">
+                        ${topInactive[0] ? topInactive[0].consecutive_inactive_days + ' দিন নিষ্ক্রিয়' : '0 দিন'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- #3 Most Inactive Pedestal -->
+                  <div class="podium-3d-card flex flex-col items-center justify-end h-40 relative cursor-pointer group" ${topInactive[2] ? `data-open-profile="${topInactive[2].id}"` : ''} title="Click to view #3 Inactive Profile">
+                    
+                    <!-- Floating 3D Warning Beacon -->
+                    <div class="mb-2 relative flex flex-col items-center">
+                      <div class="w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-slate-900 border-2 border-orange-400/60 shadow-[0_6px_16px_rgba(249,115,22,0.35)] flex items-center justify-center text-orange-400 font-black text-sm group-hover:scale-110 transition-transform duration-300">
+                        💤
+                      </div>
+                      <span class="text-[9px] font-black text-orange-300 font-mono mt-1 bg-slate-900/90 border border-orange-800 px-2 py-0.5 rounded-full shadow">#3 Warning</span>
+                    </div>
+
+                    <!-- 3D Pedestal Column -->
+                    <div class="w-full bg-gradient-to-b from-orange-950/40 via-slate-900/90 to-slate-950 border-t-2 border-orange-500/70 border-x border-slate-800/80 rounded-t-2xl p-2.5 text-center shadow-[0_10px_25px_rgba(0,0,0,0.6)]">
+                      <p class="text-[11px] font-black text-slate-100 truncate group-hover:text-orange-300 transition">${topInactive[2] ? topInactive[2].name : '---'}</p>
+                      <p class="text-[9px] text-slate-400 font-bold font-mono truncate mt-0.5">${topInactive[2] ? 'Level: ' + topInactive[2].level : 'খালি স্লট'}</p>
+                      
+                      <div class="mt-2 w-full bg-orange-500/15 border border-orange-500/30 text-orange-300 rounded-lg py-1 px-1 text-[10px] font-black shadow-inner truncate">
+                        ${topInactive[2] ? topInactive[2].consecutive_inactive_days + ' দিন' : '0 দিন'}
+                      </div>
+                    </div>
+                  </div>
+
+                </div>
               </div>
 
+              <!-- 3D Ranked List Items -->
               <div class="space-y-2 max-h-[320px] overflow-y-auto pr-1">
                 ${inactiveList.length > 0 ? inactiveList.map((m, idx) => `
-                  <div class="flex items-center justify-between bg-slate-950/40 hover:bg-slate-950 border border-slate-850 hover:border-slate-800 p-3 rounded-xl transition duration-150 cursor-pointer group" data-open-profile="${m.id}" title="Click to view Member Profile">
+                  <div class="flex items-center justify-between bg-slate-950/60 hover:bg-slate-900/90 border border-slate-850 hover:border-rose-500/40 p-3 rounded-2xl transition duration-200 cursor-pointer group shadow-sm hover:shadow-md hover:-translate-y-0.5" data-open-profile="${m.id}" title="Click to view Member Profile">
                     <div class="flex items-center gap-3">
-                      <div class="w-6 h-6 rounded-full bg-slate-950 border border-slate-800 flex items-center justify-center text-[10px] font-bold text-rose-400">${idx + 1}</div>
+                      <div class="w-7 h-7 rounded-xl bg-slate-900 border border-rose-500/30 flex items-center justify-center text-xs font-black text-rose-400 shadow-inner">${idx + 1}</div>
                       <div>
-                        <p class="text-xs font-bold text-slate-200 group-hover:text-rose-400 transition">${m.name}</p>
-                        <p class="text-[9px] text-slate-500 font-medium">ID: #${m.member_number} | Level: ${m.level}</p>
+                        <p class="text-xs font-black text-slate-200 group-hover:text-rose-400 transition">${m.name}</p>
+                        <p class="text-[9px] text-slate-400 font-semibold font-mono">ID: #${m.member_number} • Level: ${m.level}</p>
                       </div>
                     </div>
                     <div class="text-right">
-                      <p class="text-xs font-extrabold text-rose-400 font-mono">${m.consecutive_inactive_days} দিন ইনেক্টিভ</p>
-                      <p class="text-[9px] text-slate-500 mt-0.5">শেষ একটিভ: ${m.last_active_date || 'কখনো নয়'}</p>
+                      <p class="text-xs font-black text-rose-400 font-mono">${m.consecutive_inactive_days} দিন ইনেক্টিভ</p>
+                      <p class="text-[9px] text-slate-500 mt-0.5 font-mono">শেষ একটিভ: ${m.last_active_date || 'কখনো নয়'}</p>
                     </div>
                   </div>
                 `).join('') : `
