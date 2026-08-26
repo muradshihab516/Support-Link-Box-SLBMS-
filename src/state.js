@@ -16,6 +16,7 @@ let state = {
   editingNotesText: '',
   bulkInputText: '',
   bulkInputDate: new Date().toISOString().split('T')[0],
+  processedBulkResult: null,
   noticeFilterDays: 3,
   noticeFilterMode: 'above',
   noticeType: 'simple',

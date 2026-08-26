@@ -120,14 +120,17 @@ export function getDailySubmissionBreakdown(targetDate, searchQuery = '') {
 
 // Render the complete Management Section HTML
 export function renderManagementSection(state) {
-  const selectedDate = state.managementSelectedDate || new Date().toISOString().split('T')[0];
+  const distinctDates = getDistinctSubmissionDates();
+  const todayStr = new Date().toISOString().split('T')[0];
+  
+  // Default to the latest recorded date if available, otherwise today
+  const selectedDate = state.managementSelectedDate || (distinctDates.length > 0 ? distinctDates[0].date : todayStr);
   const activeTab = state.managementActiveTab || 'all'; // 'all', 'active', 'inactive', 'archive'
   const searchQuery = state.managementSearchQuery || '';
 
-  const distinctDates = getDistinctSubmissionDates();
   const breakdown = getDailySubmissionBreakdown(selectedDate, searchQuery);
-
   const formattedSelectedDate = formatDisplayDate(selectedDate);
+  const isToday = selectedDate === todayStr;
 
   return `
     <div id="management-section-root" class="space-y-6">
@@ -137,15 +140,18 @@ export function renderManagementSection(state) {
         <div class="absolute right-0 top-0 w-80 h-80 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none"></div>
         <div class="absolute left-10 bottom-0 w-60 h-60 bg-emerald-500/5 rounded-full blur-2xl pointer-events-none"></div>
 
-        <div class="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800/80 pb-5">
+        <div class="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-800/80 pb-5">
           <div class="space-y-1.5">
-            <div class="flex items-center gap-2">
+            <div class="flex flex-wrap items-center gap-2">
               <span class="text-xs bg-indigo-500/20 text-indigo-400 font-bold px-3 py-1 rounded-xl border border-indigo-500/30 uppercase tracking-widest flex items-center gap-1.5">
                 <i data-lucide="clipboard-check" class="w-3.5 h-3.5"></i>
                 Daily Submission Management
               </span>
-              <span class="text-[10px] bg-slate-950 text-slate-400 border border-slate-800 px-2.5 py-1 rounded-xl font-bold font-mono">
-                ${distinctDates.length} Days Recorded
+              <span class="text-[10px] bg-slate-950 text-slate-300 border border-slate-800 px-2.5 py-1 rounded-xl font-bold font-mono">
+                📊 মোট ${distinctDates.length} দিনের ডাটা সংরক্ষিত
+              </span>
+              <span class="text-[10px] ${isToday ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30' : (breakdown.hasLogsForDate ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' : 'bg-amber-500/20 text-amber-300 border-amber-500/30')} border px-2.5 py-1 rounded-xl font-bold font-mono">
+                📅 নির্বাচিত: ${formattedSelectedDate} ${isToday ? '(Today)' : ''}
               </span>
             </div>
             <h2 class="text-xl sm:text-2xl font-black text-slate-100 flex items-center gap-2">
@@ -157,25 +163,65 @@ export function renderManagementSection(state) {
           </div>
 
           <!-- Date Navigation / Picker Controls -->
-          <div class="flex flex-wrap items-center gap-2.5 bg-slate-950/90 border border-slate-800 p-2.5 rounded-2xl shrink-0 shadow-lg">
-            <button id="management-prev-date-btn" class="p-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800 transition cursor-pointer" title="Previous Day">
-              <i data-lucide="chevron-left" class="w-4 h-4"></i>
-            </button>
+          <div class="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-2.5 bg-slate-950/90 border border-slate-800 p-2.5 rounded-2xl shrink-0 shadow-lg">
+            
+            ${distinctDates.length > 0 ? `
+              <!-- Quick dropdown of all recorded dates -->
+              <div class="flex items-center gap-1.5 bg-slate-900 border border-slate-800 px-2.5 py-1.5 rounded-xl">
+                <i data-lucide="list" class="w-3.5 h-3.5 text-indigo-400 shrink-0"></i>
+                <select id="management-recorded-dates-select" class="bg-transparent text-xs font-mono font-bold text-slate-200 focus:outline-none cursor-pointer max-w-[170px] truncate">
+                  ${distinctDates.map(d => `
+                    <option value="${d.date}" class="bg-slate-950 text-slate-200" ${d.date === selectedDate ? 'selected' : ''}>
+                      ${formatDisplayDate(d.date)} (${d.activeLogs} Active)
+                    </option>
+                  `).join('')}
+                  ${!distinctDates.some(d => d.date === todayStr) ? `
+                    <option value="${todayStr}" class="bg-slate-950 text-slate-400" ${selectedDate === todayStr ? 'selected' : ''}>
+                      ${formatDisplayDate(todayStr)} (Today - 0 Logs)
+                    </option>
+                  ` : ''}
+                </select>
+              </div>
+            ` : ''}
 
-            <div class="flex items-center gap-2 px-2">
-              <i data-lucide="calendar" class="w-4 h-4 text-indigo-400 shrink-0"></i>
-              <input id="management-date-input" type="date" value="${selectedDate}" class="bg-slate-900 border border-slate-800 text-xs font-mono font-bold text-slate-200 px-3 py-1.5 rounded-xl focus:outline-none focus:border-indigo-500 cursor-pointer" />
+            <!-- Date stepper & native input -->
+            <div class="flex items-center gap-1.5">
+              <button id="management-prev-date-btn" class="p-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800 transition cursor-pointer" title="Previous Day">
+                <i data-lucide="chevron-left" class="w-4 h-4"></i>
+              </button>
+
+              <div class="flex items-center gap-1.5 bg-slate-900 border border-slate-800 px-2.5 py-1.5 rounded-xl">
+                <i data-lucide="calendar" class="w-3.5 h-3.5 text-indigo-400 shrink-0"></i>
+                <input id="management-date-input" type="date" value="${selectedDate}" class="bg-transparent text-xs font-mono font-bold text-slate-200 focus:outline-none cursor-pointer" />
+              </div>
+
+              <button id="management-next-date-btn" class="p-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800 transition cursor-pointer" title="Next Day">
+                <i data-lucide="chevron-right" class="w-4 h-4"></i>
+              </button>
+
+              <button id="management-today-btn" class="text-[10px] font-black uppercase px-3 py-2 ${isToday ? 'bg-indigo-600 text-white shadow-md' : 'bg-slate-900 text-indigo-400 hover:bg-indigo-600/20 border border-slate-800 hover:border-indigo-500/30'} rounded-xl transition cursor-pointer shrink-0" title="Go to Today's date">
+                ${isToday ? '📍 Today' : '📅 Today'}
+              </button>
             </div>
 
-            <button id="management-next-date-btn" class="p-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800 transition cursor-pointer" title="Next Day">
-              <i data-lucide="chevron-right" class="w-4 h-4"></i>
-            </button>
-
-            <button id="management-today-btn" class="text-[10px] font-black uppercase px-3 py-2 bg-indigo-600/20 text-indigo-400 hover:bg-indigo-600/30 border border-indigo-500/30 rounded-xl transition cursor-pointer">
-              Today
-            </button>
           </div>
         </div>
+
+        ${!breakdown.hasLogsForDate ? `
+          <!-- Notice when selected date has no logs -->
+          <div class="bg-amber-500/10 border border-amber-500/20 p-3.5 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-amber-300">
+            <div class="flex items-center gap-2">
+              <i data-lucide="alert-circle" class="w-4 h-4 text-amber-400 shrink-0"></i>
+              <span><strong>${formattedSelectedDate}</strong> তারিখে কোনো লিংক সাবমিশন রেকর্ড পাওয়া যায়নি।</span>
+            </div>
+            ${distinctDates.length > 0 && distinctDates[0].date !== selectedDate ? `
+              <button data-management-select-date="${distinctDates[0].date}" class="px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/30 rounded-xl font-bold font-mono transition cursor-pointer text-xs shrink-0 flex items-center gap-1.5">
+                <i data-lucide="arrow-right" class="w-3.5 h-3.5"></i>
+                সর্বশেষ রেকর্ডকৃত তারিখ (${formatDisplayDate(distinctDates[0].date)})
+              </button>
+            ` : ''}
+          </div>
+        ` : ''}
 
         <!-- Quick Summary Stats Grid for Selected Date -->
         <div class="grid grid-cols-2 sm:grid-cols-5 gap-3 pt-1">

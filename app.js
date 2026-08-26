@@ -149,8 +149,8 @@ function render() {
   // Active overview statistics calculations (Excluding frozen members)
   const nonFrozenMembers = state.members.filter(m => m.status !== 'frozen');
   const totalCount = nonFrozenMembers.length;
-  const activeCount = nonFrozenMembers.filter(m => m.status === 'active').length;
-  const inactiveCount = nonFrozenMembers.filter(m => m.status === 'inactive' || m.status === 'warning').length;
+  const activeCount = nonFrozenMembers.filter(m => m.consecutive_inactive_days === 0).length;
+  const inactiveCount = nonFrozenMembers.filter(m => m.consecutive_inactive_days > 0).length;
   const diamondCount = nonFrozenMembers.filter(m => m.level === 'Diamond').length;
 
   container.innerHTML = `
@@ -1497,7 +1497,10 @@ export const supabase = createClient(supabaseUrl, supabaseKey)
 
     // TAB: BULK INPUT / ACTIVITY TRACKER
     case 'bulk_input': {
-      const { parsedNames, matchedMembers, unregisteredNames } = parseBulkActivityText(state.bulkInputText);
+      const processed = state.processedBulkResult;
+      const matchedMembers = processed ? processed.matchedMembers : [];
+      const unregisteredNames = processed ? processed.unregisteredNames : [];
+      const parsedNames = processed ? processed.parsedNames : [];
 
       return `
         <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -1509,19 +1512,33 @@ export const supabase = createClient(supabaseUrl, supabaseKey)
                 <i data-lucide="clipboard-list" class="w-5 h-5 text-indigo-400"></i>
                 <h3 class="font-bold text-slate-100 text-base">Daily Link Submission Tracker</h3>
               </div>
-              <input id="bulk-input-date" type="date" value="${state.bulkInputDate}" class="bg-slate-950 border border-slate-800 text-xs px-3 py-1.5 rounded-xl text-slate-300 font-semibold focus:outline-none focus:border-indigo-500 cursor-pointer" />
+              <div class="flex items-center gap-2">
+                <input id="bulk-input-date" type="date" value="${state.bulkInputDate}" class="bg-slate-950 border border-slate-800 text-xs px-3 py-1.5 rounded-xl text-slate-300 font-semibold focus:outline-none focus:border-indigo-500 cursor-pointer" />
+                <button id="clear-bulk-textarea-btn" class="text-[11px] bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 px-2.5 py-1.5 rounded-xl font-bold transition cursor-pointer" title="Clear text">
+                  Clear
+                </button>
+              </div>
             </div>
 
-            <p class="text-xs text-slate-400 leading-relaxed">
-              Paste raw text containing member link submissions directly from your Facebook Messenger group or support post. The tracker automatically identifies mentions, increments active streaks, and flags unregistered names.
+            <p class="text-xs text-slate-400 leading-relaxed font-sans">
+              Facebook Messenger গ্রুপ বা পোস্ট থেকে ২০০–৩০০+ মেম্বারের লিংক সাবমিশন টেক্সট এখানে নির্দ্বিধায় পেস্ট করুন। পেস্ট করার সময় কোনো অটো-প্রসেসিং চলবে না, তাই মোবাইল স্ক্রিন একদম হ্যাং বা ফ্রিজ হবে না।
             </p>
 
-            <textarea id="bulk-activity-textarea" rows="12" placeholder="1. @Rahi Ahmed Rabiul&#10;2. @Orithra Mazumder&#10;3. @Ahmed Sopon" class="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 text-xs text-slate-300 placeholder-slate-700 focus:outline-none focus:border-indigo-500 font-mono leading-relaxed resize-y">${state.bulkInputText}</textarea>
+            <textarea id="bulk-activity-textarea" rows="11" placeholder="Paste 200–300 names or link list here...&#10;&#10;Example:&#10;1. @Rahi Ahmed Rabiul&#10;2. @Orithra Mazumder&#10;3. @Ahmed Sopon" class="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 text-xs text-slate-300 placeholder-slate-700 focus:outline-none focus:border-indigo-500 font-mono leading-relaxed resize-y">${state.bulkInputText || ''}</textarea>
 
-            <button id="save-activity-btn" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xs py-3.5 rounded-xl shadow-[0_4px_12px_rgba(79,70,229,0.3)] transition-all flex items-center justify-center gap-2 cursor-pointer" ${parsedNames.length === 0 ? 'disabled' : ''}>
-              <i data-lucide="save" class="w-4 h-4"></i>
-              Save Daily Activity (${parsedNames.length} Mentions Found)
-            </button>
+            <div class="space-y-2">
+              <button id="process-bulk-list-btn" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xs py-3.5 rounded-xl shadow-[0_4px_12px_rgba(79,70,229,0.3)] transition-all flex items-center justify-center gap-2 cursor-pointer">
+                <i data-lucide="play-circle" class="w-4 h-4"></i>
+                ⚙️ Process List
+              </button>
+              
+              ${processed ? `
+                <button id="open-preview-from-processed-btn" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs py-3 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer animate-fade-in">
+                  <i data-lucide="check-circle" class="w-4 h-4"></i>
+                  Review & Confirm Submission (${matchedMembers.length} Active Identified)
+                </button>
+              ` : ''}
+            </div>
 
             ${state.lastSubmissionSnapshot ? (() => {
               const elapsed = Date.now() - new Date(state.lastSubmissionSnapshot.timestamp).getTime();
@@ -1551,94 +1568,152 @@ export const supabase = createClient(supabaseUrl, supabaseKey)
             })() : ''}
           </div>
 
-          <!-- Right column: real-time parser diagnostic output -->
+          <!-- Right column: processing output and workflow status -->
           <div class="lg:col-span-6 flex flex-col gap-6">
             
-            <!-- Panel 1: Matched Registered Members List -->
-            <div class="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-xl flex-grow flex flex-col justify-between min-h-[300px]">
-              <div>
+            ${!processed ? `
+              <!-- Empty state / instructions guide -->
+              <div class="bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-5">
+                <div class="border-b border-slate-800 pb-3">
+                  <h4 class="font-bold text-slate-100 text-sm uppercase tracking-wider flex items-center gap-2">
+                    <i data-lucide="info" class="w-4 h-4 text-indigo-400"></i>
+                    Daily Submission Workflow Guide
+                  </h4>
+                  <p class="text-xs text-slate-400 mt-1">
+                    মোবাইলের সর্বোচ্চ পারফরম্যান্স নিশ্চিত করতে ৪-ধাপের নিরাপদ সাবমিশন পদ্ধতি:
+                  </p>
+                </div>
+
+                <div class="space-y-3.5 text-xs text-slate-300">
+                  <div class="flex items-start gap-3 bg-slate-950/60 p-3 rounded-xl border border-slate-850">
+                    <span class="w-6 h-6 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center font-bold font-mono text-xs shrink-0">1</span>
+                    <div>
+                      <p class="font-bold text-slate-200">Paste raw member link list</p>
+                      <p class="text-[11px] text-slate-500 mt-0.5">বামে টেক্সট বক্সে লিংক লিস্ট পেস্ট করুন। পেস্টের সময় কোনো হ্যাং বা ল্যাগ হবে না।</p>
+                    </div>
+                  </div>
+
+                  <div class="flex items-start gap-3 bg-slate-950/60 p-3 rounded-xl border border-slate-850">
+                    <span class="w-6 h-6 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center font-bold font-mono text-xs shrink-0">2</span>
+                    <div>
+                      <p class="font-bold text-slate-200">Click "⚙️ Process List"</p>
+                      <p class="text-[11px] text-slate-500 mt-0.5">বাটন চাপার পর সিস্টেম নাম ফিল্টার, ডুপ্লিকেট চেকিং ও মেম্বার ম্যাচিং সম্পন্ন করবে।</p>
+                    </div>
+                  </div>
+
+                  <div class="flex items-start gap-3 bg-slate-950/60 p-3 rounded-xl border border-slate-850">
+                    <span class="w-6 h-6 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center font-bold font-mono text-xs shrink-0">3</span>
+                    <div>
+                      <p class="font-bold text-slate-200">Review & Resolve</p>
+                      <p class="text-[11px] text-slate-500 mt-0.5">ডুপ্লিকেট বা অনিবন্ধিত নাম থাকলে পপআপে দ্রুত রিনেম বা অ্যাড করার সুযোগ পাবেন।</p>
+                    </div>
+                  </div>
+
+                  <div class="flex items-start gap-3 bg-slate-950/60 p-3 rounded-xl border border-slate-850">
+                    <span class="w-6 h-6 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center font-bold font-mono text-xs shrink-0">4</span>
+                    <div>
+                      <p class="font-bold text-slate-200">Confirm & Auto-Recalculate</p>
+                      <p class="text-[11px] text-slate-500 mt-0.5">সাবমিট করার সাথে সাথে অ্যাক্টিভ/ইনঅ্যাক্টিভ কাউন্ট, স্ট্রিক ও লিডারবোর্ড রিফ্রেশ হবে।</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="bg-indigo-500/5 border border-indigo-500/10 rounded-xl p-3.5 flex items-center justify-between text-xs font-mono">
+                  <span class="text-slate-400">Database Status:</span>
+                  <span class="text-indigo-400 font-bold">${state.members.length} Registered Members</span>
+                </div>
+              </div>
+            ` : `
+              <!-- Panel 1: Matched Registered Members List -->
+              <div class="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-xl flex-grow flex flex-col justify-between min-h-[280px]">
+                <div>
+                  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/60 pb-3 mb-3">
+                    <h4 class="font-bold text-slate-200 text-xs uppercase tracking-wider flex items-center gap-1.5">
+                      <i data-lucide="check-circle" class="w-4 h-4 text-emerald-400"></i>
+                      Identified Active Members (${matchedMembers.length})
+                    </h4>
+                    <span class="text-[10px] text-indigo-400 font-mono font-bold bg-indigo-500/10 px-2 py-0.5 rounded">Click name to view profile</span>
+                  </div>
+
+                  <div class="max-h-64 overflow-y-auto space-y-1.5 pr-1 divide-y divide-slate-850/40 font-mono text-[10px]">
+                    ${matchedMembers.length > 0 ? matchedMembers.map(m => `
+                      <div class="flex justify-between items-center py-2 px-2 hover:bg-slate-950/40 rounded-lg transition-colors">
+                        <div class="flex items-center gap-2 cursor-pointer group/item" data-open-profile="${m.id}" title="Click to view Member Profile">
+                          <span class="text-slate-100 font-semibold group-hover/item:text-indigo-400 transition">${m.name}</span>
+                          <span class="text-slate-500 font-bold">No.${m.member_number}</span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                          <span class="px-1.5 py-0.5 rounded text-[8px] font-bold ${
+                            m.level === 'Diamond' ? 'bg-cyan-500/10 text-cyan-400' :
+                            m.level === 'Gold' ? 'bg-amber-500/10 text-amber-400' :
+                            m.level === 'Silver' ? 'bg-slate-300/10 text-slate-300' :
+                            'bg-amber-700/10 text-amber-600'
+                          }">${m.level}</span>
+                          <button data-open-profile="${m.id}" class="text-[9px] bg-slate-850 hover:bg-indigo-600 hover:text-white text-slate-400 px-1.5 py-0.5 rounded transition cursor-pointer font-bold">Profile</button>
+                        </div>
+                      </div>
+                    `).join('') : `
+                      <p class="text-[11px] text-slate-600 italic py-8 text-center">কোনো নিবন্ধিত মেম্বার সনাক্ত হয়নি।</p>
+                    `}
+                  </div>
+                </div>
+
+                <div class="bg-indigo-500/5 border border-indigo-500/10 rounded-xl p-3 flex gap-2 items-start mt-4">
+                  <i data-lucide="award" class="w-4 h-4 text-indigo-400 flex-shrink-0 mt-0.5"></i>
+                  <p class="text-[10px] text-slate-400 leading-relaxed font-sans">
+                    <strong class="text-indigo-400">Streak & Point Increment:</strong> সাবমিট করলে সনাক্ত হওয়া মেম্বাররা <span class="font-bold font-mono text-indigo-400">+10 Points</span> পাবে এবং তাদের স্ট্রিক ১ বাড়বে।
+                  </p>
+                </div>
+              </div>
+
+              <!-- Panel 2: Unmatched unregistered names finder -->
+              <div class="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-xl">
                 <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/60 pb-3 mb-3">
                   <h4 class="font-bold text-slate-200 text-xs uppercase tracking-wider flex items-center gap-1.5">
-                    <i data-lucide="check-circle" class="w-4 h-4 text-emerald-400"></i>
-                    Identified Active Members (${matchedMembers.length})
+                    <i data-lucide="alert-triangle" class="w-4 h-4 text-amber-500 animate-pulse"></i>
+                    Unregistered / New Names (${unregisteredNames.length})
                   </h4>
-                </div>
-
-                <div class="max-h-72 overflow-y-auto space-y-1.5 pr-1 divide-y divide-slate-850/40 font-mono text-[10px]">
-                  ${matchedMembers.length > 0 ? matchedMembers.map(m => `
-                    <div class="flex justify-between items-center py-2 px-2 hover:bg-slate-950/40 rounded-lg transition-colors">
-                      <span class="text-slate-100 font-semibold">${m.name}</span>
-                      <div class="flex items-center gap-2">
-                        <span class="text-slate-500 font-bold">No.${m.member_number}</span>
-                        <span class="px-1.5 py-0.5 rounded text-[8px] font-bold ${
-                          m.level === 'Diamond' ? 'bg-cyan-500/10 text-cyan-400' :
-                          m.level === 'Gold' ? 'bg-amber-500/10 text-amber-400' :
-                          m.level === 'Silver' ? 'bg-slate-300/10 text-slate-300' :
-                          'bg-amber-700/10 text-amber-600'
-                        }">${m.level}</span>
-                      </div>
+                  ${unregisteredNames.length > 0 ? `
+                    <div class="flex items-center gap-2">
+                      <button id="select-all-new-btn" class="text-[9px] bg-amber-500/10 hover:bg-amber-600 text-amber-400 hover:text-slate-950 px-2 py-1 rounded-md border border-amber-500/20 font-bold transition-all cursor-pointer">
+                        Select All
+                      </button>
+                      <button id="deselect-all-new-btn" class="text-[9px] bg-rose-500/10 hover:bg-rose-500 text-rose-400 hover:text-white px-2 py-1 rounded-md border border-rose-500/20 font-bold transition-all cursor-pointer">
+                        Clear All
+                      </button>
                     </div>
-                  `).join('') : `
-                    <p class="text-[11px] text-slate-600 italic py-8 text-center">Paste raw link submissions in the input box to identify active members.</p>
+                  ` : ''}
+                </div>
+                <p class="text-[10px] text-slate-400 mb-3 font-sans">এই নামগুলো মেনশন ছিল কিন্তু বর্তমানে রেজিস্টার্ড নয়। চাইলে এদের এক ক্লিকে রেজিস্টার করতে পারেন:</p>
+                
+                <div class="max-h-40 overflow-y-auto space-y-1.5 pr-1 divide-y divide-slate-850/40 font-mono text-[10px]">
+                  ${unregisteredNames.length > 0 ? unregisteredNames.map(name => {
+                    return `
+                      <div class="flex justify-between items-center py-2 px-1 hover:bg-slate-950/30 rounded-lg">
+                        <label class="flex items-center gap-2 cursor-pointer select-none">
+                          <input type="checkbox" data-new-name-check="${name}" class="new-member-checkbox rounded border-slate-800 text-amber-500 focus:ring-amber-500/20 w-4.5 h-4.5 bg-slate-950 cursor-pointer" checked />
+                          <span class="new-member-name-label text-amber-400 font-bold transition-all">${name}</span>
+                        </label>
+                        <button data-quick-add-name="${name}" class="text-indigo-400 hover:text-indigo-300 font-bold flex items-center gap-1 cursor-pointer">
+                          <i data-lucide="plus-circle" class="w-3.5 h-3.5"></i> Add
+                        </button>
+                      </div>
+                    `;
+                  }).join('') : `
+                    <p class="text-[11px] text-slate-600 italic py-4 text-center font-sans">কোনো অনিবন্ধিত নাম পাওয়া যায়নি।</p>
                   `}
                 </div>
-              </div>
 
-              <div class="bg-indigo-500/5 border border-indigo-500/10 rounded-xl p-3 flex gap-2 items-start mt-4">
-                <i data-lucide="award" class="w-4 h-4 text-indigo-400 flex-shrink-0 mt-0.5"></i>
-                <p class="text-[10px] text-slate-400 leading-relaxed">
-                  <strong class="text-indigo-400">Streak & Point Increment:</strong> Saving updates the database: identified members receive <span class="font-bold font-mono text-indigo-400">+10 Pts</span> and their consecutive active streaks increase by 1.
-                </p>
-              </div>
-            </div>
-
-            <!-- Panel 2: Unmatched unregistered names finder -->
-            <div class="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-xl">
-              <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/60 pb-3 mb-3">
-                <h4 class="font-bold text-slate-200 text-xs uppercase tracking-wider flex items-center gap-1.5">
-                  <i data-lucide="alert-triangle" class="w-4 h-4 text-amber-500 animate-pulse"></i>
-                  Unregistered / New Names (${unregisteredNames.length})
-                </h4>
                 ${unregisteredNames.length > 0 ? `
-                  <div class="flex items-center gap-2">
-                    <button id="select-all-new-btn" class="text-[9px] bg-amber-500/10 hover:bg-amber-600 text-amber-400 hover:text-slate-950 px-2 py-1 rounded-md border border-amber-500/20 font-bold transition-all cursor-pointer">
-                      Select All
-                    </button>
-                    <button id="deselect-all-new-btn" class="text-[9px] bg-rose-500/10 hover:bg-rose-500 text-rose-400 hover:text-white px-2 py-1 rounded-md border border-rose-500/20 font-bold transition-all cursor-pointer">
-                      Clear All
+                  <div class="mt-4 pt-3 border-t border-slate-800/60">
+                    <button id="register-selected-new-btn" class="w-full bg-amber-600 hover:bg-amber-500 text-slate-950 font-extrabold text-[11px] py-2.5 rounded-xl shadow-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer">
+                      <i data-lucide="user-plus" class="w-4 h-4"></i>
+                      Bulk Register Selected (<span id="bulk-register-count">${unregisteredNames.length}</span>) New Members
                     </button>
                   </div>
                 ` : ''}
               </div>
-              <p class="text-[10px] text-slate-400 mb-3">These names were mentioned but are not currently registered. You can select and register them individually or in bulk.</p>
-              
-              <div class="max-h-40 overflow-y-auto space-y-1.5 pr-1 divide-y divide-slate-850/40 font-mono text-[10px]">
-                ${unregisteredNames.length > 0 ? unregisteredNames.map(name => {
-                  return `
-                    <div class="flex justify-between items-center py-2 px-1 hover:bg-slate-950/30 rounded-lg">
-                      <label class="flex items-center gap-2 cursor-pointer select-none">
-                        <input type="checkbox" data-new-name-check="${name}" class="new-member-checkbox rounded border-slate-800 text-amber-500 focus:ring-amber-500/20 w-4.5 h-4.5 bg-slate-950 cursor-pointer" checked />
-                        <span class="new-member-name-label text-amber-400 font-bold transition-all">${name}</span>
-                      </label>
-                      <button data-quick-add-name="${name}" class="text-indigo-400 hover:text-indigo-300 font-bold flex items-center gap-1 cursor-pointer">
-                        <i data-lucide="plus-circle" class="w-3.5 h-3.5"></i> Add
-                      </button>
-                    </div>
-                  `;
-                }).join('') : `
-                  <p class="text-[11px] text-slate-600 italic py-4 text-center">No unregistered names detected.</p>
-                `}
-              </div>
-
-              ${unregisteredNames.length > 0 ? `
-                <div class="mt-4 pt-3 border-t border-slate-800/60">
-                  <button id="register-selected-new-btn" class="w-full bg-amber-600 hover:bg-amber-500 text-slate-950 font-extrabold text-[11px] py-2.5 rounded-xl shadow-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer">
-                    <i data-lucide="user-plus" class="w-4 h-4"></i>
-                    Bulk Register Selected (<span id="bulk-register-count">${unregisteredNames.length}</span>) New Members
-                  </button>
-                </div>
-              ` : ''}
-            </div>
+            `}
 
           </div>
         </div>
@@ -1911,16 +1986,19 @@ ${listText}
                 ${warningMembers.length > 0 ? warningMembers.map(m => {
                   const isChecked = (state.selectedFreezeMemberIds || []).includes(m.id);
                   return `
-                    <label class="flex items-center justify-between p-2.5 bg-slate-950/50 border ${isChecked ? 'border-rose-500/35 bg-rose-500/5' : 'border-slate-800'} rounded-xl hover:border-slate-700 transition cursor-pointer select-none">
+                    <div class="flex items-center justify-between p-2.5 bg-slate-950/50 border ${isChecked ? 'border-rose-500/35 bg-rose-500/5' : 'border-slate-800'} rounded-xl hover:border-slate-700 transition select-none">
                       <div class="flex items-center gap-3">
                         <input type="checkbox" data-freeze-member-id="${m.id}" ${isChecked ? 'checked' : ''} class="w-4 h-4 text-indigo-600 bg-slate-950 border-slate-800 rounded focus:ring-indigo-500 cursor-pointer" />
-                        <div>
-                          <span class="text-slate-200 font-bold font-sans">${m.name}</span>
-                          <span class="text-[10px] text-slate-500 ml-1.5 font-mono">No.${m.member_number}</span>
+                        <div class="cursor-pointer group/name flex items-center gap-1.5" data-open-profile="${m.id}" title="Click to view Member Profile">
+                          <span class="text-slate-200 font-bold font-sans group-hover/name:text-indigo-400 transition">${m.name}</span>
+                          <span class="text-[10px] text-slate-500 font-mono">No.${m.member_number}</span>
                         </div>
                       </div>
-                      <span class="text-rose-400 font-bold bg-rose-500/5 px-2 py-0.5 rounded border border-rose-500/10">${m.consecutive_inactive_days} দিন ইনেক্টিভ</span>
-                    </label>
+                      <div class="flex items-center gap-2">
+                        <span class="text-rose-400 font-bold bg-rose-500/5 px-2 py-0.5 rounded border border-rose-500/10">${m.consecutive_inactive_days} দিন ইনেক্টিভ</span>
+                        <button data-open-profile="${m.id}" class="text-[9px] bg-slate-850 hover:bg-indigo-600 hover:text-white text-slate-400 px-2 py-1 rounded-lg transition cursor-pointer font-bold font-sans">Profile</button>
+                      </div>
+                    </div>
                   `;
                 }).join('') : `
                   <p class="text-xs text-slate-600 text-center py-6 font-sans">কোনো নিষ্ক্রিয় মেম্বার নেই।</p>
@@ -2509,7 +2587,7 @@ ${listText}
 function renderMemberProfileModal() {
   if (!state.memberProfileModal) return '';
   const memberId = state.memberProfileModal.memberId;
-  const member = (state.members && state.members.find(m => m.id === memberId)) || getMembers().find(m => m.id === memberId);
+  const member = (state.members && state.members.find(m => String(m.id) === String(memberId) || String(m.member_number) === String(memberId))) || getMembers().find(m => String(m.id) === String(memberId) || String(m.member_number) === String(memberId));
   if (!member) return '';
 
   const activeTab = state.memberProfileModal.currentTab || 'overview';
@@ -3144,18 +3222,39 @@ function openActivityDetail(logId, memberId) {
 }
 
 // Global helper to open member profile modal
-function openMemberProfile(memberId) {
+function openMemberProfile(memberIdentifier) {
+  if (!memberIdentifier) return;
   const currentMembers = getMembers();
+  let member = currentMembers.find(m => String(m.id) === String(memberIdentifier));
+  if (!member) {
+    member = currentMembers.find(m => String(m.member_number) === String(memberIdentifier));
+  }
+  if (!member) {
+    member = currentMembers.find(m => (m.name || '').toLowerCase() === String(memberIdentifier).toLowerCase());
+  }
+  if (!member) {
+    const matched = findMatchingMember(String(memberIdentifier), currentMembers);
+    if (matched && matched.member) {
+      member = matched.member;
+    }
+  }
+
+  if (!member) {
+    showToast('মেম্বার প্রোফাইল খুঁজে পাওয়া যায়নি!', 'error');
+    return;
+  }
+
   updateState({
     members: currentMembers,
     memberProfileModal: {
-      memberId: memberId,
+      memberId: member.id,
       currentTab: 'overview',
       manualLogDate: new Date().toISOString().split('T')[0],
       manualLogPoints: 10
     }
   });
 }
+window.openMemberProfile = openMemberProfile;
 
 // Helper to generate and download high-resolution PNG Performance Card
 function downloadMemberReportCardPng(memberId) {
@@ -4364,42 +4463,28 @@ Generated on: ${new Date().toLocaleString()}
   // TAB EVENTS: BULK INPUT / ACTIVITY TRACKER
   if (state.currentTab === 'bulk_input') {
     
-    // Activity input text area modification with performance debouncing for mobile devices
+    // Activity input text area modification: pure local setting with zero background parsing lag on mobile/desktop
     const textarea = document.getElementById('bulk-activity-textarea');
-    let inputDebounceTimer = null;
     if (textarea) {
       textarea.oninput = (e) => {
-        const text = e.target.value;
-        state.bulkInputText = text;
-        
-        clearTimeout(inputDebounceTimer);
-        inputDebounceTimer = setTimeout(() => {
-          const detectedDate = detectDateFromText(text);
-          const nextState = { 
-            bulkInputText: text,
-            uncheckedUnregisteredNames: []
-          };
-          if (detectedDate) {
-            nextState.bulkInputDate = detectedDate;
-          }
-          updateState(nextState);
-        }, 300);
+        state.bulkInputText = e.target.value;
       };
 
-      textarea.onpaste = (e) => {
-        // Allow mobile/desktop clipboard paste to populate smoothly without blocking main thread
-        setTimeout(() => {
-          const text = textarea.value;
-          const detectedDate = detectDateFromText(text);
-          const nextState = { 
-            bulkInputText: text,
-            uncheckedUnregisteredNames: []
-          };
-          if (detectedDate) {
-            nextState.bulkInputDate = detectedDate;
-          }
-          updateState(nextState);
-        }, 60);
+      textarea.onpaste = () => {
+        // Zero lag on paste! Fast and smooth for 200-300+ entries
+      };
+    }
+
+    // Clear text button
+    const clearBtn = document.getElementById('clear-bulk-textarea-btn');
+    if (clearBtn) {
+      clearBtn.onclick = () => {
+        const ta = document.getElementById('bulk-activity-textarea');
+        if (ta) ta.value = '';
+        updateState({
+          bulkInputText: '',
+          processedBulkResult: null
+        });
       };
     }
 
@@ -4411,29 +4496,59 @@ Generated on: ${new Date().toLocaleString()}
       };
     }
 
-    // Submit Action Save button click (saves activity with async UI responsiveness)
-    const saveBtn = document.getElementById('save-activity-btn');
-    if (saveBtn) {
-      saveBtn.onclick = () => {
-        if (!state.bulkInputText || !state.bulkInputText.trim()) {
-          showToast('দয়া করে ডেইলি লিঙ্ক সাবমিশনের টেক্সট প্রদান করুন!', 'error');
+    // Manual "⚙️ Process List" Button Handler
+    const processBtn = document.getElementById('process-bulk-list-btn');
+    if (processBtn) {
+      processBtn.onclick = () => {
+        const ta = document.getElementById('bulk-activity-textarea');
+        const text = (ta ? ta.value : state.bulkInputText || '').trim();
+        if (!text) {
+          showToast('দয়া করে ডেইলি লিঙ্ক সাবমিশনের টেক্সট পেস্ট করুন!', 'error');
           return;
         }
 
-        saveBtn.disabled = true;
-        const originalHtml = saveBtn.innerHTML;
-        saveBtn.innerHTML = `<span class="inline-block animate-spin mr-1.5">⏳</span> প্রক্রিয়াকরণ হচ্ছে...`;
+        state.bulkInputText = text;
+        const detectedDate = detectDateFromText(text);
+        if (detectedDate) {
+          state.bulkInputDate = detectedDate;
+        }
+
+        processBtn.disabled = true;
+        processBtn.innerHTML = `<span class="inline-block animate-spin mr-1.5">⚙️</span> প্রসেসিং হচ্ছে (Processing)...`;
         
         setTimeout(() => {
           try {
-            processDailySubmissionWorkflow(state.bulkInputText, false);
+            const parsed = parseBulkActivityText(text);
+            updateState({
+              bulkInputText: text,
+              processedBulkResult: parsed
+            });
+
+            // Trigger workflow check for duplicates and unregistered members
+            processDailySubmissionWorkflow(text, false);
+          } catch (err) {
+            console.error(err);
+            showToast('প্রসেসিংয়ে ত্রুটি হয়েছে: ' + err.message, 'error');
           } finally {
-            if (saveBtn) {
-              saveBtn.disabled = false;
-              saveBtn.innerHTML = originalHtml;
+            if (processBtn) {
+              processBtn.disabled = false;
+              processBtn.innerHTML = `<i data-lucide="play-circle" class="w-4 h-4"></i> ⚙️ Process List`;
+              if (window.lucide) window.lucide.createIcons();
             }
           }
-        }, 20);
+        }, 30);
+      };
+    }
+
+    // Open submission preview and confirm from processed state
+    const openPreviewBtn = document.getElementById('open-preview-from-processed-btn');
+    if (openPreviewBtn) {
+      openPreviewBtn.onclick = () => {
+        const ta = document.getElementById('bulk-activity-textarea');
+        const text = (ta ? ta.value : state.bulkInputText || '').trim();
+        if (text) {
+          processDailySubmissionWorkflow(text, false);
+        }
       };
     }
 
@@ -4443,6 +4558,11 @@ Generated on: ${new Date().toLocaleString()}
         const rawName = e.currentTarget.getAttribute('data-quick-add-name');
         if (handleAddMember(rawName)) {
           showToast(`"${rawName}" সফলভাবে ডাটাবেজে রেজিস্টার হয়েছে এবং এখন একটিভ তালিকায় সনাক্ত করা যাবে!`, 'success');
+          if (state.bulkInputText) {
+            updateState({
+              processedBulkResult: parseBulkActivityText(state.bulkInputText)
+            });
+          }
         }
       };
     });
@@ -4533,7 +4653,9 @@ Generated on: ${new Date().toLocaleString()}
                 msg += ` (এবং ${result.duplicateNames.length} জন অলরেডি রেজিস্টার্ড থাকায় বাদ দেওয়া হয়েছে)`;
               }
               showToast(msg, 'success');
-              updateState({});
+              updateState({
+                processedBulkResult: state.bulkInputText ? parseBulkActivityText(state.bulkInputText) : null
+              });
             } else {
               showToast('কোনো নতুন মেম্বার রেজিস্টার করা যায়নি। হয়তো তারা ইতিমধ্যে রেজিস্টার্ড!', 'error');
             }
@@ -5646,11 +5768,23 @@ function bindLoginEvents() {
   }
 
   // ================= MANAGEMENT SECTION EVENTS =================
-  // Date picker
+  // Quick Recorded Dates Dropdown
+  const mgmtDateSelect = document.getElementById('management-recorded-dates-select');
+  if (mgmtDateSelect) {
+    mgmtDateSelect.onchange = (e) => {
+      if (e.target.value) {
+        updateState({ managementSelectedDate: e.target.value });
+      }
+    };
+  }
+
+  // Date picker input
   const mgmtDateInp = document.getElementById('management-date-input');
   if (mgmtDateInp) {
-    mgmtDateInp.onchange = (e) => {
-      updateState({ managementSelectedDate: e.target.value });
+    mgmtDateInp.oninput = mgmtDateInp.onchange = (e) => {
+      if (e.target.value) {
+        updateState({ managementSelectedDate: e.target.value });
+      }
     };
   }
 
@@ -6040,6 +6174,19 @@ function bindLoginEvents() {
 
 // Kickstart Application
 window.addEventListener('DOMContentLoaded', () => {
+  // Global robust delegation for data-open-profile clicks anywhere in document
+  document.addEventListener('click', (e) => {
+    const profileEl = e.target.closest('[data-open-profile]');
+    if (profileEl) {
+      const memberId = profileEl.getAttribute('data-open-profile');
+      if (memberId) {
+        e.preventDefault();
+        e.stopPropagation();
+        openMemberProfile(memberId);
+      }
+    }
+  }, true);
+
   loadStateFromStorage();
   recalculateAllMemberStatsFromLogs();
   updateState({ members: getMembers() });

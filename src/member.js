@@ -552,8 +552,10 @@ export function recalculateAllMemberStatsFromLogs(explicitLogs = null, membersLi
     } else {
       if (allSubmissionDates.length === 0 || !latestTrackedDate) {
         consecutiveInactiveDays = 0;
+        status = 'active';
       } else if (activeDates.has(latestTrackedDate)) {
         consecutiveInactiveDays = 0;
+        status = 'active';
       } else {
         // Count consecutive submission dates backwards from latestTrackedDate where the member was NOT active
         for (let i = allSubmissionDates.length - 1; i >= 0; i--) {
@@ -572,15 +574,17 @@ export function recalculateAllMemberStatsFromLogs(explicitLogs = null, membersLi
             break;
           }
         }
-      }
 
-      // Determine status for non-frozen members based on missed submission rounds
-      if (consecutiveInactiveDays >= 12) {
-        status = 'inactive';
-      } else if (consecutiveInactiveDays >= 7) {
-        status = 'warning';
-      } else {
-        status = 'active';
+        // Determine status for non-frozen members based on missed submission rounds
+        if (consecutiveInactiveDays >= 12) {
+          status = 'inactive';
+        } else if (consecutiveInactiveDays >= 7) {
+          status = 'warning';
+        } else if (consecutiveInactiveDays >= 1) {
+          status = 'inactive';
+        } else {
+          status = 'active';
+        }
       }
     }
 

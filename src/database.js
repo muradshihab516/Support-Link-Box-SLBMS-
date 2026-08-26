@@ -12,41 +12,26 @@ const dbCache = {
 
 // Database Initializer
 export function initializeDatabase() {
-  // Purge legacy demo data if detected to ensure a completely clean start
-  try {
-    const existingMembersRaw = localStorage.getItem(STORAGE_KEYS.MEMBERS);
-    if (existingMembersRaw) {
-      const existingMembers = JSON.parse(existingMembersRaw);
-      const hasLegacyDemo = Array.isArray(existingMembers) && existingMembers.some(m => 
-        m && (m.name === 'Rahi Ahmed Rabiul' || m.name === 'HM Jakaria Ahmed' || m.id === 'member-1')
-      );
-      if (hasLegacyDemo) {
-        localStorage.removeItem(STORAGE_KEYS.MEMBERS);
-        localStorage.removeItem(STORAGE_KEYS.LOGS);
-        localStorage.removeItem(STORAGE_KEYS.AUDIT);
-        localStorage.removeItem(STORAGE_KEYS.BADGES);
-        console.log('Legacy demo database detected and successfully purged from LocalStorage.');
-      }
-    }
-  } catch (e) {
-    console.error('Error checking or purging legacy demo database:', e);
-  }
-
-  // Ensure initial empty values exist
+  // Ensure initial storage keys exist if not present
   if (!localStorage.getItem(STORAGE_KEYS.MEMBERS)) {
     localStorage.setItem(STORAGE_KEYS.MEMBERS, JSON.stringify([]));
+  }
+  if (!localStorage.getItem(STORAGE_KEYS.LOGS)) {
     localStorage.setItem(STORAGE_KEYS.LOGS, JSON.stringify([]));
-
+  }
+  if (!localStorage.getItem(STORAGE_KEYS.AUDIT)) {
     const audit = [{
       id: 'audit-initial',
       admin_email: 'shihab@linkbox.com',
       admin_name: 'Md Shihab Khan',
       action: 'INITIALIZE',
       entity_type: 'DATABASE',
-      description: 'System database initialized with clean empty state.',
+      description: 'System database initialized.',
       timestamp: new Date().toISOString()
     }];
     localStorage.setItem(STORAGE_KEYS.AUDIT, JSON.stringify(audit));
+  }
+  if (!localStorage.getItem(STORAGE_KEYS.BADGES)) {
     localStorage.setItem(STORAGE_KEYS.BADGES, JSON.stringify([]));
   }
 }
