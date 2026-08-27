@@ -2,7 +2,7 @@
 import { ADMIN_NAMES } from './constants.js';
 import { getMembers, getActivityLogs } from './database.js';
 
-// Helper to format date string to DD-MM-YY
+// Helper to format date string to DD-MM-YYYY
 export function formatDisplayDate(dateStr) {
   if (!dateStr) return 'N/A';
   try {
@@ -10,7 +10,10 @@ export function formatDisplayDate(dateStr) {
     if (parts.length === 3) {
       const day = parts[2].padStart(2, '0');
       const month = parts[1].padStart(2, '0');
-      const year = parts[0].slice(-2);
+      let year = parts[0];
+      if (year.length === 2) {
+        year = '20' + year;
+      }
       return `${day}-${month}-${year}`;
     }
   } catch (e) {}
@@ -21,9 +24,15 @@ export function formatDisplayDate(dateStr) {
 export function getDistinctSubmissionDates() {
   const logs = getActivityLogs();
   const dateMap = new Map();
+  const currentYear = new Date().getFullYear();
 
   logs.forEach(log => {
-    if (!log.activity_date) return;
+    if (!log.activity_date || typeof log.activity_date !== 'string') return;
+    const parts = log.activity_date.split('-');
+    const y = parseInt(parts[0], 10);
+    // Ignore invalid or future years (> currentYear + 1 or < 2020)
+    if (y > currentYear + 1 || y < 2020) return;
+
     if (!dateMap.has(log.activity_date)) {
       dateMap.set(log.activity_date, {
         date: log.activity_date,
@@ -53,6 +62,7 @@ export function getDailySubmissionBreakdown(targetDate, searchQuery = '') {
   const members = getMembers();
   const nonFrozenMembers = members.filter(m => m.status !== 'frozen');
   const logs = getActivityLogs().filter(l => l.activity_date === targetDate);
+  const hasLogsForDate = logs.length > 0;
   
   // Build lookup of logs by member_id for target date
   const logByMemberId = new Map();
@@ -94,11 +104,11 @@ export function getDailySubmissionBreakdown(targetDate, searchQuery = '') {
   ].filter(filterFn);
 
   const totalRegistered = nonFrozenMembers.length;
-  const activeCount = activeMembers.length;
-  const inactiveCount = inactiveMembers.length;
-  const activeRate = totalRegistered > 0 ? Math.round((activeCount / totalRegistered) * 100) : 0;
-  const inactiveRate = 100 - activeRate;
-  const diamondActiveCount = activeMembers.filter(item => item.member.level === 'Diamond').length;
+  const activeCount = hasLogsForDate ? activeMembers.length : 0;
+  const inactiveCount = hasLogsForDate ? inactiveMembers.length : 0;
+  const activeRate = (hasLogsForDate && totalRegistered > 0) ? Math.round((activeCount / totalRegistered) * 100) : 0;
+  const inactiveRate = hasLogsForDate ? (100 - activeRate) : 0;
+  const diamondActiveCount = hasLogsForDate ? activeMembers.filter(item => item.member.level === 'Diamond').length : 0;
   const totalPoints = logs.reduce((sum, l) => sum + (l.points_earned !== undefined ? l.points_earned : (l.is_active ? 10 : 0)), 0);
 
   return {
@@ -114,7 +124,7 @@ export function getDailySubmissionBreakdown(targetDate, searchQuery = '') {
     allMembersBreakdown,
     activeMembers: filteredActive,
     inactiveMembers: filteredInactive,
-    hasLogsForDate: logs.length > 0
+    hasLogsForDate
   };
 }
 
@@ -351,14 +361,45 @@ export function renderManagementSection(state) {
       </div>
 
       <!-- Main Tab Content Area -->
-      ${activeTab === 'archive' ? renderHistoricalDatesArchive(distinctDates, selectedDate) : ''}
+      ${activeTab === 'archive' ? renderHistoricalDatesArchive(distinctDates, selectedDate) : (
+        !breakdown.hasLogsForDate ? renderNoLogsForDateState(selectedDate, formattedSelectedDate, distinctDates) : (
+          activeTab === 'all' ? renderAllMembersForDate(breakdown, selectedDate) :
+          activeTab === 'active' ? renderActiveMembersForDate(breakdown.activeMembers, selectedDate) :
+          renderInactiveMembersForDate(breakdown.inactiveMembers, selectedDate)
+        )
+      )}
 
-      ${activeTab === 'all' ? renderAllMembersForDate(breakdown, selectedDate) : ''}
+    </div>
+  `;
+}
 
-      ${activeTab === 'active' ? renderActiveMembersForDate(breakdown.activeMembers, selectedDate) : ''}
-
-      ${activeTab === 'inactive' ? renderInactiveMembersForDate(breakdown.inactiveMembers, selectedDate) : ''}
-
+// Render friendly Empty State when no list exists for the selected date
+function renderNoLogsForDateState(selectedDate, formattedSelectedDate, distinctDates) {
+  return `
+    <div class="bg-slate-900 border border-slate-800 rounded-3xl p-8 sm:p-12 text-center shadow-xl space-y-4">
+      <div class="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 mx-auto text-2xl shadow-inner">
+        📅
+      </div>
+      <div class="space-y-2 max-w-lg mx-auto">
+        <h3 class="text-base sm:text-lg font-black text-slate-100">
+          এই তারিখের কোনো Daily Link List জমা দেওয়া হয়নি
+        </h3>
+        <p class="text-xs sm:text-sm text-slate-400 leading-relaxed font-sans">
+          <strong>${formattedSelectedDate}</strong> তারিখে কোনো মেম্বারের লিংক সাবমিশন রেকর্ড পাওয়া যায়নি। এডমিন নিজে লিঙ্ক লিস্ট সাবমিট না করা পর্যন্ত কোনো সক্রিয় বা নিষ্ক্রিয় তালিকা তৈরি হবে না।
+        </p>
+      </div>
+      <div class="pt-3 flex flex-wrap items-center justify-center gap-3">
+        <button data-tab="bulk" class="tab-btn px-5 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xs rounded-xl shadow-lg transition cursor-pointer flex items-center gap-2">
+          <i data-lucide="upload" class="w-4 h-4"></i>
+          + এই তারিখের জন্য লিঙ্ক লিস্ট জমা দিন
+        </button>
+        ${distinctDates.length > 0 ? `
+          <button data-management-select-date="${distinctDates[0].date}" class="px-5 py-3 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-xs rounded-xl transition cursor-pointer flex items-center gap-2">
+            <i data-lucide="calendar" class="w-4 h-4 text-emerald-400"></i>
+            সর্বশেষ রেকর্ড দেখুন (${formatDisplayDate(distinctDates[0].date)})
+          </button>
+        ` : ''}
+      </div>
     </div>
   `;
 }
@@ -378,7 +419,7 @@ function renderHistoricalDatesArchive(distinctDates, selectedDate) {
           </h3>
           <p class="text-[11px] text-slate-400 mt-0.5">যে সকল তারিখে Daily Link জমা রেকর্ড করা হয়েছে তাদের সম্পূর্ণ হিস্টোরি।</p>
         </div>
-        <span class="text-xs font-bold text-cyan-400 bg-cyan-500/10 px-3 py-1 rounded-xl border border-cyan-500/20 font-mono">
+        <span class="text-xs font-bold text-cyan-400 bg-cyan-500/10 px-3 py-1.5 rounded-xl border border-cyan-500/20 font-mono">
           মোট ${distinctDates.length} দিন
         </span>
       </div>

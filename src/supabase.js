@@ -507,42 +507,6 @@ export async function testSupabaseConnection() {
       throw new Error(`Select Test Failed: ${selectRes.error.message}`);
     }
 
-    const testId = `test-conn-${Date.now()}`;
-    const testMember = {
-      id: testId,
-      name: 'System Test Connection',
-      display_name: '@testconn',
-      member_number: 999999,
-      status: 'active',
-      level: 'Bronze',
-      total_points: 0,
-      current_streak: 0,
-      longest_streak: 0,
-      total_active_days: 0,
-      last_active_date: null,
-      consecutive_inactive_days: 0,
-      notes: 'temp_test_connection_record'
-    };
-
-    try {
-      insertRes = await client.from('members').insert([testMember]);
-    } catch (netErr) {
-      throw new Error(`ডাটা ইনসার্ট করতে নেটওয়ার্ক সমস্যা হয়েছে (Failed to fetch): অনুগ্রহ করে Supabase সংযোগ ও RLS পারমিশন যাচাই করুন।`);
-    }
-
-    if (insertRes && insertRes.error) {
-      if (insertRes.error.message.includes('row-level security') || insertRes.error.code === '42501') {
-        throw new Error(`RLS_BLOCKED: ${insertRes.error.message}`);
-      }
-      throw new Error(`Insert Test Failed: ${insertRes.error.message}`);
-    }
-
-    try {
-      await client.from('members').delete().eq('id', testId);
-    } catch (delErr) {
-      console.warn('Test record cleanup note:', delErr);
-    }
-
     updateState({ supabaseConnectionStatus: 'connected', supabaseConnectionError: '' });
     return true;
   } catch (err) {
@@ -591,9 +555,20 @@ export async function performSmartSync(silent = true) {
     if (remoteA.error) throw new Error(`Audit Trails: ${remoteA.error.message}`);
 
     const rMembers = (remoteM.data || []).map(item => mapDbToLocal('members', item)).filter(Boolean);
-    const rLogs = (remoteL.data || []).map(item => mapDbToLocal('activity_logs', item)).filter(Boolean);
+    let rLogs = (remoteL.data || []).map(item => mapDbToLocal('activity_logs', item)).filter(Boolean);
     const rBadges = (remoteB.data || []).map(item => mapDbToLocal('badges', item)).filter(Boolean);
     const rAudits = (remoteA.data || []).map(item => mapDbToLocal('audit_trails', item)).filter(Boolean);
+
+    // Production wipe for remote test activity logs
+    if (localStorage.getItem('support_linkbox_remote_test_logs_purged_v2') !== 'done') {
+      try {
+        await client.from('activity_logs').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+        rLogs = [];
+        localStorage.setItem('support_linkbox_remote_test_logs_purged_v2', 'done');
+      } catch (purgeErr) {
+        console.warn('Remote test logs purge skipped:', purgeErr);
+      }
+    }
 
     const localMembers = getMembers();
     const localLogs = getActivityLogs();

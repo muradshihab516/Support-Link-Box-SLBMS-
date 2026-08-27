@@ -26,13 +26,46 @@ export function initializeDatabase() {
       admin_name: 'Md Shihab Khan',
       action: 'INITIALIZE',
       entity_type: 'DATABASE',
-      description: 'System database initialized.',
+      description: 'System database initialized in production mode.',
       timestamp: new Date().toISOString()
     }];
     localStorage.setItem(STORAGE_KEYS.AUDIT, JSON.stringify(audit));
   }
   if (!localStorage.getItem(STORAGE_KEYS.BADGES)) {
     localStorage.setItem(STORAGE_KEYS.BADGES, JSON.stringify([]));
+  }
+
+  // Production migration: Wipe all testing activity logs and reset stats
+  const CLEANUP_KEY = 'support_linkbox_production_cleanup_v2';
+  if (localStorage.getItem(CLEANUP_KEY) !== 'done') {
+    localStorage.setItem(STORAGE_KEYS.LOGS, JSON.stringify([]));
+    dbCache.logs = [];
+
+    try {
+      let rawMembers = JSON.parse(localStorage.getItem(STORAGE_KEYS.MEMBERS) || '[]');
+      if (Array.isArray(rawMembers) && rawMembers.length > 0) {
+        rawMembers.forEach(m => {
+          if (!m) return;
+          m.total_points = 0;
+          m.current_streak = 0;
+          m.longest_streak = 0;
+          m.best_streak = 0;
+          m.consecutive_inactive_days = 0;
+          m.total_active_days = 0;
+          m.last_active_date = null;
+          m.submission_count = 0;
+          if (m.status !== 'frozen') {
+            m.status = 'active';
+          }
+        });
+        localStorage.setItem(STORAGE_KEYS.MEMBERS, JSON.stringify(rawMembers));
+        dbCache.members = rawMembers;
+      }
+    } catch (e) {
+      console.warn('Production cleanup member reset notice:', e);
+    }
+
+    localStorage.setItem(CLEANUP_KEY, 'done');
   }
 }
 
@@ -105,7 +138,32 @@ export function getActivityLogs() {
     return dbCache.logs;
   }
   try {
-    dbCache.logs = JSON.parse(localStorage.getItem(STORAGE_KEYS.LOGS) || '[]');
+    let logs = JSON.parse(localStorage.getItem(STORAGE_KEYS.LOGS) || '[]');
+    if (Array.isArray(logs)) {
+      const currentYear = new Date().getFullYear();
+      let cleaned = false;
+      logs = logs.map(l => {
+        if (!l) return l;
+        if (l.activity_date && typeof l.activity_date === 'string') {
+          const parts = l.activity_date.split('-');
+          const y = parseInt(parts[0], 10);
+          if (y > currentYear + 1 || y < 2020) {
+            // Fix corrupted year by clamping or replacing with current year
+            parts[0] = String(currentYear);
+            l.activity_date = parts.join('-');
+            cleaned = true;
+          }
+        }
+        return l;
+      }).filter(Boolean);
+
+      if (cleaned) {
+        localStorage.setItem(STORAGE_KEYS.LOGS, JSON.stringify(logs));
+      }
+      dbCache.logs = logs;
+    } else {
+      dbCache.logs = [];
+    }
   } catch (err) {
     console.error('Failed to parse logs from storage, resetting:', err);
     dbCache.logs = [];
@@ -577,36 +635,84 @@ export function findFuzzyMemberSuggestion(rawName, membersList, threshold = 0.50
   return null;
 }
 
+// Helper to normalize Bengali numerals to standard digits
+export function convertBanglaToEnglishDigits(str) {
+  if (!str) return '';
+  const banglaDigits = ['০', '১', '২', '৩', '৪', '৫', '৬', '৭', '৮', '৯'];
+  return str.replace(/[০-৯]/g, d => banglaDigits.indexOf(d).toString());
+}
+
 // Date helper algorithms
 export function detectDateFromText(text) {
   if (!text) return null;
-  const dateRegex = /(?:📅|তারিখ|tarikh)?\s*(?::|\s)\s*([0-3]?\d)[-\/\.]([0-1]?\d)[-\/\.](20\d{2}|\d{2})\b/i;
-  const match = text.match(dateRegex);
-  if (match) {
-    let d = parseInt(match[1], 10);
-    let m = parseInt(match[2], 10);
-    let y = parseInt(match[3], 10);
-    if (d > 0 && d <= 31 && m > 0 && m <= 12) {
-      if (y < 100) y = 2000 + y;
+  const normalizedText = convertBanglaToEnglishDigits(text);
+  const currentYear = new Date().getFullYear();
+  const maxAllowedYear = currentYear + 1; // e.g. 2027
+  const minAllowedYear = 2020;
+
+  // 1. Look for explicit date lines with prefix (📅, তারিখ, date, tarikh)
+  const explicitPrefixRegex = /(?:📅|তারিখ|tarikh|date)\s*[:：\-]?\s*([0-3]?\d)[\/\-\.]([0-1]?\d)[\/\-\.](20\d{2}|\d{2})\b/i;
+  const expMatch = normalizedText.match(explicitPrefixRegex);
+  if (expMatch) {
+    let d = parseInt(expMatch[1], 10);
+    let m = parseInt(expMatch[2], 10);
+    let y = parseInt(expMatch[3], 10);
+    if (y < 100) {
+      if (y >= 20 && y <= 30) {
+        y = 2000 + y;
+      } else {
+        y = currentYear;
+      }
+    }
+    if (d > 0 && d <= 31 && m > 0 && m <= 12 && y >= minAllowedYear && y <= maxAllowedYear) {
       const paddedD = String(d).padStart(2, '0');
       const paddedM = String(m).padStart(2, '0');
       return `${y}-${paddedM}-${paddedD}`;
     }
   }
 
-  const simpleDateRegex = /\b([0-3]?\d)[-\/\.]([0-1]?\d)[-\/\.](20\d{2}|\d{2})\b/;
-  const simpleMatch = text.match(simpleDateRegex);
-  if (simpleMatch) {
-    let d = parseInt(simpleMatch[1], 10);
-    let m = parseInt(simpleMatch[2], 10);
-    let y = parseInt(simpleMatch[3], 10);
-    if (d > 0 && d <= 31 && m > 0 && m <= 12) {
-      if (y < 100) y = 2000 + y;
+  // 2. Look for ISO format: YYYY-MM-DD
+  const isoRegex = /\b(20\d{2})[\/\-\.]([0-1]?\d)[\/\-\.]([0-3]?\d)\b/;
+  const isoMatch = normalizedText.match(isoRegex);
+  if (isoMatch) {
+    let y = parseInt(isoMatch[1], 10);
+    let m = parseInt(isoMatch[2], 10);
+    let d = parseInt(isoMatch[3], 10);
+    if (d > 0 && d <= 31 && m > 0 && m <= 12 && y >= minAllowedYear && y <= maxAllowedYear) {
       const paddedD = String(d).padStart(2, '0');
       const paddedM = String(m).padStart(2, '0');
       return `${y}-${paddedM}-${paddedD}`;
     }
   }
+
+  // 3. Look for standard DD-MM-YYYY or DD/MM/YYYY with 4-digit year
+  const fullYearRegex = /\b([0-3]?\d)[\/\-\.]([0-1]?\d)[\/\-\.](20\d{2})\b/;
+  const fullMatch = normalizedText.match(fullYearRegex);
+  if (fullMatch) {
+    let d = parseInt(fullMatch[1], 10);
+    let m = parseInt(fullMatch[2], 10);
+    let y = parseInt(fullMatch[3], 10);
+    if (d > 0 && d <= 31 && m > 0 && m <= 12 && y >= minAllowedYear && y <= maxAllowedYear) {
+      const paddedD = String(d).padStart(2, '0');
+      const paddedM = String(m).padStart(2, '0');
+      return `${y}-${paddedM}-${paddedD}`;
+    }
+  }
+
+  // 4. Look for 2-digit year DD-MM-YY only if year is within 20..30 (e.g. 24, 25, 26)
+  const shortYearRegex = /\b([0-3]?\d)[\/\-\.]([0-1]?\d)[\/\-\.](2[0-9])\b/;
+  const shortMatch = normalizedText.match(shortYearRegex);
+  if (shortMatch) {
+    let d = parseInt(shortMatch[1], 10);
+    let m = parseInt(shortMatch[2], 10);
+    let y = 2000 + parseInt(shortMatch[3], 10);
+    if (d > 0 && d <= 31 && m > 0 && m <= 12 && y >= minAllowedYear && y <= maxAllowedYear) {
+      const paddedD = String(d).padStart(2, '0');
+      const paddedM = String(m).padStart(2, '0');
+      return `${y}-${paddedM}-${paddedD}`;
+    }
+  }
+
   return null;
 }
 

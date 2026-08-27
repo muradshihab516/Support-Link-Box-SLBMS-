@@ -22,7 +22,7 @@ import {
   recalculateAllMemberStatsFromLogs, addManualMemberLog, updateMemberLogStatus, deleteMemberLog,
   updateActivityLog, deleteActivityLog,
   updateMemberDetails, addMemberAlias, removeMemberAlias,
-  deleteDailySubmissionRecord, addMemberToDateSubmission, removeMemberFromDateSubmission,
+  deleteDailySubmissionRecord, clearAllActivityLogsRecords, addMemberToDateSubmission, removeMemberFromDateSubmission,
   markSubmissionInvalid, replaceMemberInDateSubmission
 } from './src/member.js';
 import { 
@@ -147,10 +147,11 @@ function render() {
   }
 
   // Active overview statistics calculations (Excluding frozen members)
+  // Rule: Only members missing >= 3 submission days are considered inactive (1 or 2 days missed is still active)
   const nonFrozenMembers = state.members.filter(m => m.status !== 'frozen');
   const totalCount = nonFrozenMembers.length;
-  const activeCount = nonFrozenMembers.filter(m => m.consecutive_inactive_days === 0).length;
-  const inactiveCount = nonFrozenMembers.filter(m => m.consecutive_inactive_days > 0).length;
+  const activeCount = nonFrozenMembers.filter(m => m.consecutive_inactive_days < 3).length;
+  const inactiveCount = nonFrozenMembers.filter(m => m.consecutive_inactive_days >= 3).length;
   const diamondCount = nonFrozenMembers.filter(m => m.level === 'Diamond').length;
 
   container.innerHTML = `
@@ -2023,20 +2024,23 @@ ${listText}
 
     // TAB: LEADERBOARDS
     case 'leaderboards': {
-      // Filter list for stats search
+      // Filter list for stats search (excluding frozen members)
+      const rawSearch = (state.leaderboardSearchQuery || '').trim().toLowerCase().replace(/^#/, '');
       const filteredForStats = state.members.filter(m => 
-        m.name.toLowerCase().includes(state.leaderboardSearchQuery.toLowerCase()) || 
-        m.display_name.toLowerCase().includes(state.leaderboardSearchQuery.toLowerCase()) ||
-        m.member_number.toString() === state.leaderboardSearchQuery
+        m.status !== 'frozen' && (!rawSearch ? true : (
+          (m.name && m.name.toLowerCase().includes(rawSearch)) || 
+          (m.display_name && m.display_name.toLowerCase().includes(rawSearch)) ||
+          (m.member_number !== undefined && m.member_number !== null && m.member_number.toString().includes(rawSearch))
+        ))
       );
 
       const activeList = [...filteredForStats]
         .filter(m => m.total_points >= state.leaderboardActiveThreshold)
-        .sort((a, b) => b.total_points - a.total_points || b.current_streak - a.current_streak);
+        .sort((a, b) => b.total_points - a.total_points || b.current_streak - a.current_streak || (a.member_number || 0) - (b.member_number || 0));
 
       const inactiveList = [...filteredForStats]
         .filter(m => m.consecutive_inactive_days >= state.leaderboardInactiveThreshold)
-        .sort((a, b) => b.consecutive_inactive_days - a.consecutive_inactive_days);
+        .sort((a, b) => b.consecutive_inactive_days - a.consecutive_inactive_days || (a.member_number || 0) - (b.member_number || 0));
 
       const topActive = activeList.slice(0, 3);
       const topInactive = inactiveList.slice(0, 3);
@@ -2187,7 +2191,7 @@ ${listText}
 
                     <!-- 3D Pedestal Column -->
                     <div class="w-full bg-gradient-to-b from-slate-700/50 via-slate-900/90 to-slate-950 border-t-2 border-slate-300/80 border-x border-slate-800/80 rounded-t-2xl p-2.5 text-center shadow-[0_10px_25px_rgba(0,0,0,0.6),inset_0_1px_1px_rgba(255,255,255,0.2)]">
-                      <p class="text-[11px] font-black text-slate-100 truncate group-hover:text-indigo-300 transition">${topActive[1] ? topActive[1].name : '---'}</p>
+                      <p class="text-[11px] font-black text-slate-100 truncate group-hover:text-indigo-300 transition">${topActive[1] ? (topActive[1].name || topActive[1].display_name || ('Member #' + topActive[1].member_number)) : '---'}</p>
                       <p class="text-[9px] text-indigo-400/90 font-bold font-mono truncate mt-0.5">${topActive[1] ? '🔥 ' + topActive[1].current_streak + 'd streak' : 'খালি স্লট'}</p>
                       
                       <div class="mt-2 w-full bg-slate-800/90 border border-slate-700 text-slate-200 rounded-lg py-1 px-1 text-[10px] font-black shadow-inner truncate">
@@ -2213,7 +2217,7 @@ ${listText}
 
                     <!-- 3D Gold Pedestal Column -->
                     <div class="w-full bg-gradient-to-b from-yellow-500/25 via-slate-900/95 to-slate-950 border-t-2 border-yellow-300 border-x border-yellow-500/30 rounded-t-2xl p-2.5 text-center shadow-[0_15px_35px_rgba(234,179,8,0.25),inset_0_2px_4px_rgba(255,255,255,0.3)] relative">
-                      <p class="text-xs sm:text-sm font-black text-white truncate group-hover:text-yellow-300 transition drop-shadow">${topActive[0] ? topActive[0].name : '---'}</p>
+                      <p class="text-xs sm:text-sm font-black text-white truncate group-hover:text-yellow-300 transition drop-shadow">${topActive[0] ? (topActive[0].name || topActive[0].display_name || ('Member #' + topActive[0].member_number)) : '---'}</p>
                       <p class="text-[9px] sm:text-[10px] text-yellow-400 font-bold font-mono truncate mt-0.5">${topActive[0] ? '🔥 ' + topActive[0].current_streak + ' days streak' : 'খালি স্লট'}</p>
                       
                       <div class="mt-2 w-full bg-gradient-to-r from-yellow-500 to-amber-500 text-slate-950 rounded-xl py-1.5 px-1 text-[11px] font-black shadow-[0_4px_12px_rgba(234,179,8,0.4)] truncate">
@@ -2235,7 +2239,7 @@ ${listText}
 
                     <!-- 3D Bronze Pedestal Column -->
                     <div class="w-full bg-gradient-to-b from-amber-700/40 via-slate-900/90 to-slate-950 border-t-2 border-amber-500/80 border-x border-slate-800/80 rounded-t-2xl p-2.5 text-center shadow-[0_10px_25px_rgba(0,0,0,0.6),inset_0_1px_1px_rgba(255,255,255,0.2)]">
-                      <p class="text-[11px] font-black text-slate-100 truncate group-hover:text-amber-300 transition">${topActive[2] ? topActive[2].name : '---'}</p>
+                      <p class="text-[11px] font-black text-slate-100 truncate group-hover:text-amber-300 transition">${topActive[2] ? (topActive[2].name || topActive[2].display_name || ('Member #' + topActive[2].member_number)) : '---'}</p>
                       <p class="text-[9px] text-amber-400/90 font-bold font-mono truncate mt-0.5">${topActive[2] ? '🔥 ' + topActive[2].current_streak + 'd streak' : 'খালি স্লট'}</p>
                       
                       <div class="mt-2 w-full bg-slate-800/90 border border-amber-800/50 text-amber-300 rounded-lg py-1 px-1 text-[10px] font-black shadow-inner truncate">
@@ -2258,8 +2262,8 @@ ${listText}
                         idx === 2 ? 'bg-amber-600/20 text-amber-300 border-amber-600/40' : 'bg-slate-900 text-slate-400 border-slate-800'
                       }">${idx + 1}</div>
                       <div>
-                        <p class="text-xs font-black text-slate-200 group-hover:text-indigo-300 transition">${m.name}</p>
-                        <p class="text-[9px] text-slate-400 font-semibold font-mono">Lvl: ${m.level} • ID: #${m.member_number}</p>
+                        <p class="text-xs font-black text-slate-200 group-hover:text-indigo-300 transition">${m.name || m.display_name || ('Member #' + m.member_number)}</p>
+                        <p class="text-[9px] text-slate-400 font-semibold font-mono">Lvl: ${m.level || 'Bronze'} • ID: #${m.member_number}</p>
                       </div>
                     </div>
                     <div class="text-right">
@@ -2298,7 +2302,7 @@ ${listText}
 
                 <div>
                   <select id="leaderboard-inactive-filter" class="bg-slate-950/80 border border-slate-800 text-[11px] text-rose-300 px-3 py-1.5 rounded-xl focus:outline-none focus:border-rose-500 cursor-pointer font-bold shadow-sm">
-                    <option value="3" ${state.leaderboardInactiveThreshold === 3 ? 'selected' : ''}>৩+ দিন ইনেক্টিভ</option>
+                    <option value="3" ${state.leaderboardInactiveThreshold === 3 ? 'selected' : ''}>৩+ দিন (সকল নিষ্ক্রিয় মেম্বার)</option>
                     <option value="5" ${state.leaderboardInactiveThreshold === 5 ? 'selected' : ''}>৫+ দিন ইনেক্টিভ</option>
                     <option value="7" ${state.leaderboardInactiveThreshold === 7 ? 'selected' : ''}>৭+ দিন (চূড়ান্ত ওয়ার্নিং)</option>
                     <option value="12" ${state.leaderboardInactiveThreshold === 12 ? 'selected' : ''}>১২+ দিন (রিমুভযোগ্য)</option>
@@ -2327,8 +2331,8 @@ ${listText}
 
                     <!-- 3D Pedestal Column -->
                     <div class="w-full bg-gradient-to-b from-rose-950/40 via-slate-900/90 to-slate-950 border-t-2 border-rose-500/70 border-x border-slate-800/80 rounded-t-2xl p-2.5 text-center shadow-[0_10px_25px_rgba(0,0,0,0.6)]">
-                      <p class="text-[11px] font-black text-slate-100 truncate group-hover:text-rose-300 transition">${topInactive[1] ? topInactive[1].name : '---'}</p>
-                      <p class="text-[9px] text-slate-400 font-bold font-mono truncate mt-0.5">${topInactive[1] ? 'Level: ' + topInactive[1].level : 'খালি স্লট'}</p>
+                      <p class="text-[11px] font-black text-slate-100 truncate group-hover:text-rose-300 transition">${topInactive[1] ? (topInactive[1].name || topInactive[1].display_name || ('Member #' + topInactive[1].member_number)) : '---'}</p>
+                      <p class="text-[9px] text-slate-400 font-bold font-mono truncate mt-0.5">${topInactive[1] ? 'Level: ' + (topInactive[1].level || 'Bronze') : 'খালি স্লট'}</p>
                       
                       <div class="mt-2 w-full bg-rose-500/15 border border-rose-500/30 text-rose-300 rounded-lg py-1 px-1 text-[10px] font-black shadow-inner truncate">
                         ${topInactive[1] ? topInactive[1].consecutive_inactive_days + ' দিন' : '0 দিন'}
@@ -2353,8 +2357,8 @@ ${listText}
 
                     <!-- 3D Danger Pedestal Column -->
                     <div class="w-full bg-gradient-to-b from-rose-600/30 via-slate-900/95 to-slate-950 border-t-2 border-rose-400 border-x border-rose-500/30 rounded-t-2xl p-2.5 text-center shadow-[0_15px_35px_rgba(244,63,94,0.25)] relative">
-                      <p class="text-xs sm:text-sm font-black text-white truncate group-hover:text-rose-300 transition drop-shadow">${topInactive[0] ? topInactive[0].name : '---'}</p>
-                      <p class="text-[9px] sm:text-[10px] text-rose-300 font-bold font-mono truncate mt-0.5">${topInactive[0] ? 'Level: ' + topInactive[0].level : 'খালি স্লট'}</p>
+                      <p class="text-xs sm:text-sm font-black text-white truncate group-hover:text-rose-300 transition drop-shadow">${topInactive[0] ? (topInactive[0].name || topInactive[0].display_name || ('Member #' + topInactive[0].member_number)) : '---'}</p>
+                      <p class="text-[9px] sm:text-[10px] text-rose-300 font-bold font-mono truncate mt-0.5">${topInactive[0] ? 'Level: ' + (topInactive[0].level || 'Bronze') : 'খালি স্লট'}</p>
                       
                       <div class="mt-2 w-full bg-gradient-to-r from-rose-600 to-red-600 text-white rounded-xl py-1.5 px-1 text-[11px] font-black shadow-[0_4px_12px_rgba(244,63,94,0.4)] truncate">
                         ${topInactive[0] ? topInactive[0].consecutive_inactive_days + ' দিন নিষ্ক্রিয়' : '0 দিন'}
@@ -2375,8 +2379,8 @@ ${listText}
 
                     <!-- 3D Pedestal Column -->
                     <div class="w-full bg-gradient-to-b from-orange-950/40 via-slate-900/90 to-slate-950 border-t-2 border-orange-500/70 border-x border-slate-800/80 rounded-t-2xl p-2.5 text-center shadow-[0_10px_25px_rgba(0,0,0,0.6)]">
-                      <p class="text-[11px] font-black text-slate-100 truncate group-hover:text-orange-300 transition">${topInactive[2] ? topInactive[2].name : '---'}</p>
-                      <p class="text-[9px] text-slate-400 font-bold font-mono truncate mt-0.5">${topInactive[2] ? 'Level: ' + topInactive[2].level : 'খালি স্লট'}</p>
+                      <p class="text-[11px] font-black text-slate-100 truncate group-hover:text-orange-300 transition">${topInactive[2] ? (topInactive[2].name || topInactive[2].display_name || ('Member #' + topInactive[2].member_number)) : '---'}</p>
+                      <p class="text-[9px] text-slate-400 font-bold font-mono truncate mt-0.5">${topInactive[2] ? 'Level: ' + (topInactive[2].level || 'Bronze') : 'খালি স্লট'}</p>
                       
                       <div class="mt-2 w-full bg-orange-500/15 border border-orange-500/30 text-orange-300 rounded-lg py-1 px-1 text-[10px] font-black shadow-inner truncate">
                         ${topInactive[2] ? topInactive[2].consecutive_inactive_days + ' দিন' : '0 দিন'}
@@ -2394,18 +2398,28 @@ ${listText}
                     <div class="flex items-center gap-3">
                       <div class="w-7 h-7 rounded-xl bg-slate-900 border border-rose-500/30 flex items-center justify-center text-xs font-black text-rose-400 shadow-inner">${idx + 1}</div>
                       <div>
-                        <p class="text-xs font-black text-slate-200 group-hover:text-rose-400 transition">${m.name}</p>
-                        <p class="text-[9px] text-slate-400 font-semibold font-mono">ID: #${m.member_number} • Level: ${m.level}</p>
+                        <p class="text-xs font-black text-slate-200 group-hover:text-rose-400 transition">${m.name || m.display_name || ('Member #' + m.member_number)}</p>
+                        <p class="text-[9px] text-slate-400 font-semibold font-mono">ID: #${m.member_number} • Level: ${m.level || 'Bronze'}</p>
                       </div>
                     </div>
                     <div class="text-right">
                       <p class="text-xs font-black text-rose-400 font-mono">${m.consecutive_inactive_days} দিন ইনেক্টিভ</p>
-                      <p class="text-[9px] text-slate-500 mt-0.5 font-mono">শেষ একটিভ: ${m.last_active_date || 'কখনো নয়'}</p>
+                      <p class="text-[9px] text-slate-500 mt-0.5 font-mono">শেষ একটিভ: ${m.last_active_date ? formatDisplayDate(m.last_active_date) : 'কখনো নয়'}</p>
                     </div>
                   </div>
-                `).join('') : `
-                  <p class="text-xs text-slate-600 text-center py-8">কোনো নিষ্ক্রিয় মেম্বার পাওয়া যায়নি!</p>
-                `}
+                `).join('') : (
+                  state.leaderboardInactiveThreshold > 3 && inactiveCount > 0 ? `
+                    <div class="text-center py-8 space-y-2">
+                      <p class="text-xs text-slate-400 font-sans">নির্বাচিত ফিল্টারে (${toBanglaNumber(state.leaderboardInactiveThreshold)}+ দিন) কোনো মেম্বার নেই।</p>
+                      <p class="text-[11px] text-slate-500 font-mono">মোট নিষ্ক্রিয়: ${toBanglaNumber(inactiveCount)} জন</p>
+                      <button id="reset-leaderboard-inactive-filter-btn" class="mt-2 text-[10px] font-bold text-rose-400 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 px-3.5 py-1.5 rounded-xl transition cursor-pointer">
+                        সকল নিষ্ক্রিয় মেম্বার দেখুন (৩+ দিন)
+                      </button>
+                    </div>
+                  ` : `
+                    <p class="text-xs text-slate-500 text-center py-8 font-sans">কোনো নিষ্ক্রিয় মেম্বার নেই। সকল মেম্বার সক্রিয়!</p>
+                  `
+                )}
               </div>
             </div>
 
@@ -4912,6 +4926,13 @@ Generated on: ${new Date().toLocaleString()}
     if (inactiveFilter) {
       inactiveFilter.onchange = (e) => {
         updateState({ leaderboardInactiveThreshold: Number(e.target.value) });
+      };
+    }
+
+    const resetInactiveFilterBtn = document.getElementById('reset-leaderboard-inactive-filter-btn');
+    if (resetInactiveFilterBtn) {
+      resetInactiveFilterBtn.onclick = () => {
+        updateState({ leaderboardInactiveThreshold: 3 });
       };
     }
   }

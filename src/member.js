@@ -13,6 +13,7 @@ import {
 } from './database.js';
 import { showToast } from './toast.js';
 import { showAlert, showConfirm } from './modal.js';
+import { getSupabase } from './supabase.js';
 
 // Add single member
 export function handleAddMember(rawName, notes = '') {
@@ -576,11 +577,12 @@ export function recalculateAllMemberStatsFromLogs(explicitLogs = null, membersLi
         }
 
         // Determine status for non-frozen members based on missed submission rounds
+        // Rule: Only members missing >= 3 submission days are considered inactive
         if (consecutiveInactiveDays >= 12) {
           status = 'inactive';
         } else if (consecutiveInactiveDays >= 7) {
           status = 'warning';
-        } else if (consecutiveInactiveDays >= 1) {
+        } else if (consecutiveInactiveDays >= 3) {
           status = 'inactive';
         } else {
           status = 'active';
@@ -884,6 +886,17 @@ export function deleteDailySubmissionRecord(dateStr) {
   logs = logs.filter(l => l.activity_date !== dateStr);
   saveActivityLogs(logs);
 
+  try {
+    const supabaseClient = getSupabase();
+    if (supabaseClient) {
+      supabaseClient.from('activity_logs').delete().eq('activity_date', dateStr).then(({ error }) => {
+        if (error) console.warn('Supabase delete error for date:', dateStr, error);
+      });
+    }
+  } catch (e) {
+    console.warn('Supabase delete trigger skipped:', e);
+  }
+
   // Recalculate all member stats from remaining logs
   recalculateAllMemberStatsFromLogs(logs);
 
@@ -907,6 +920,62 @@ export function deleteDailySubmissionRecord(dateStr) {
   });
 
   showToast(`${dateStr} তারিখের সম্পূর্ণ সাবমিশন রেকর্ড মুছে ফেলা হয়েছে এবং পয়েন্ট/স্ট্রেইক রিক্যালকুলেট হয়েছে!`, 'success');
+  return true;
+}
+
+// Clear all historical activity submissions (Wipe all demo/test activity records)
+export function clearAllActivityLogsRecords() {
+  saveActivityLogs([]);
+
+  try {
+    const supabaseClient = getSupabase();
+    if (supabaseClient) {
+      supabaseClient.from('activity_logs').delete().neq('id', '00000000-0000-0000-0000-000000000000').then(({ error }) => {
+        if (error) console.warn('Supabase delete all logs error:', error);
+      });
+    }
+  } catch (e) {
+    console.warn('Supabase delete all logs trigger skipped:', e);
+  }
+  
+  // Reset all members' stats cleanly
+  const members = getMembers();
+  members.forEach(m => {
+    m.total_points = 0;
+    m.current_streak = 0;
+    m.best_streak = 0;
+    m.consecutive_inactive_days = 0;
+    m.last_active_date = null;
+    m.submission_count = 0;
+    if (m.status !== 'frozen') {
+      m.status = 'active';
+    }
+  });
+  saveMembers(members);
+
+  const state = getState();
+  const currentEmail = state.currentAdminEmail || 'shihab@linkbox.com';
+  const adminName = ADMIN_NAMES[currentEmail] || currentEmail;
+
+  const auditTrails = getAuditTrails();
+  auditTrails.unshift({
+    id: `audit-${generateUUID()}`,
+    admin_email: currentEmail,
+    admin_name: adminName,
+    action: 'CLEAR_ALL_ACTIVITY_RECORDS',
+    entity_type: 'DAILY_SUBMISSION',
+    description: 'Cleared all past demo/test link submission activity logs and reset all member stats.',
+    timestamp: new Date().toISOString()
+  });
+  saveAuditTrails(auditTrails);
+
+  updateState({
+    members: getMembers(),
+    auditTrails: getAuditTrails(),
+    managementSelectedDate: null
+  });
+
+  showToast('সকল ডেমো/অতীত অ্যাক্টিভিটি রেকর্ড মুছে ডাটাবেজ ফ্রেশ করা হয়েছে!', 'success');
   return true;
 }
 
