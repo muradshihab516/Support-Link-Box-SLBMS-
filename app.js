@@ -2669,6 +2669,7 @@ function renderMemberProfileModal() {
 
   const activeTab = state.memberProfileModal.currentTab || 'overview';
   const allLogs = getActivityLogs().filter(l => l.member_id === memberId).sort((a, b) => new Date(b.activity_date).getTime() - new Date(a.activity_date).getTime());
+  const activeLogs = allLogs.filter(l => l.is_active);
   const allBadges = getBadges().filter(b => b.member_id === memberId);
   const aliases = Array.isArray(member.aliases) ? member.aliases : [];
 
@@ -2698,11 +2699,11 @@ function renderMemberProfileModal() {
 
           <div class="flex items-center gap-2">
             <button id="modal-download-png-btn" data-member-id="${member.id}" class="bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xs px-3.5 py-2 rounded-xl shadow-lg transition flex items-center gap-1.5 cursor-pointer" ${state.isDownloadingReport ? 'disabled' : ''}>
-              <i data-lucide="download" class="w-3.5 h-3.5"></i>
+              <i data-lucide="download" class="w-3.5 h-3.5 pointer-events-none"></i>
               <span class="hidden sm:inline">${state.isDownloadingReport ? 'Downloading...' : 'Report PNG'}</span>
             </button>
-            <button id="close-member-profile-modal-btn" class="text-slate-400 hover:text-slate-200 bg-slate-950 p-2 rounded-xl border border-slate-800 transition cursor-pointer">
-              <i data-lucide="x" class="w-4 h-4"></i>
+            <button id="close-member-profile-modal-btn" data-close-profile-modal="true" onclick="if (window.closeMemberProfile) window.closeMemberProfile();" class="text-slate-400 hover:text-slate-200 bg-slate-950 p-2 rounded-xl border border-slate-800 transition cursor-pointer" title="Close Profile (Esc)">
+              <i data-lucide="x" class="w-4 h-4 pointer-events-none"></i>
             </button>
           </div>
         </div>
@@ -3362,6 +3363,11 @@ function openMemberProfile(memberIdentifier) {
   });
 }
 window.openMemberProfile = openMemberProfile;
+
+function closeMemberProfile() {
+  updateState({ memberProfileModal: null });
+}
+window.closeMemberProfile = closeMemberProfile;
 
 // Helper to generate and download high-resolution PNG Performance Card
 function downloadMemberReportCardPng(memberId) {
@@ -6308,8 +6314,26 @@ function bindLoginEvents() {
 
 // Kickstart Application
 window.addEventListener('DOMContentLoaded', () => {
-  // Global robust delegation for data-open-profile clicks anywhere in document
+  // Global robust delegation for modal actions & data-open-profile clicks anywhere in document
   document.addEventListener('click', (e) => {
+    // 1. Profile modal close button or overlay
+    const closeProfileBtn = e.target.closest('[data-close-profile-modal], #close-member-profile-modal-btn');
+    if (closeProfileBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      closeMemberProfile();
+      return;
+    }
+
+    const profileOverlay = e.target.closest('#member-profile-modal-overlay');
+    if (profileOverlay && e.target === profileOverlay) {
+      e.preventDefault();
+      e.stopPropagation();
+      closeMemberProfile();
+      return;
+    }
+
+    // 2. Open Profile
     const profileEl = e.target.closest('[data-open-profile]');
     if (profileEl) {
       const memberId = profileEl.getAttribute('data-open-profile');
@@ -6320,6 +6344,21 @@ window.addEventListener('DOMContentLoaded', () => {
       }
     }
   }, true);
+
+  // Global ESC key listener to close modals
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' || e.key === 'Esc') {
+      if (state.memberProfileModal) {
+        closeMemberProfile();
+      } else if (state.activityDetailModal) {
+        updateState({ activityDetailModal: null });
+      } else if (state.managementAddModal) {
+        updateState({ managementAddModal: null });
+      } else if (state.managementReplaceModal) {
+        updateState({ managementReplaceModal: null });
+      }
+    }
+  });
 
   loadStateFromStorage();
   recalculateAllMemberStatsFromLogs();
