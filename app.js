@@ -28,7 +28,8 @@ import {
 import { 
   renderManagementSection, 
   renderManagementAddMemberModal, 
-  renderManagementReplaceMemberModal 
+  renderManagementReplaceMemberModal,
+  formatDisplayDate
 } from './src/management.js';
 import { showToast } from './src/toast.js';
 import { showAlert, showConfirm } from './src/modal.js';
@@ -2710,7 +2711,7 @@ function renderMemberProfileModal() {
         <div class="flex items-center gap-1.5 border-b border-slate-800 pb-2.5 shrink-0 overflow-x-auto scrollbar-none">
           ${[
             { id: 'overview', label: '📊 Overview & Stats' },
-            { id: 'history', label: `📅 History (${allLogs.length})` },
+            { id: 'history', label: `📅 এক্টিভ হিস্ট্রি (${activeLogs.length})` },
             { id: 'edit', label: '✏️ Edit Profile' },
             { id: 'aliases', label: `🏷️ Aliases (${aliases.length})` }
           ].map(tab => `
@@ -2782,6 +2783,36 @@ function renderMemberProfileModal() {
                     <p class="text-xs text-slate-300 mt-0.5 bg-slate-900/60 p-2.5 rounded-xl border border-slate-800">${member.notes}</p>
                   </div>
                 ` : ''}
+              </div>
+
+              <!-- Active Link Submission Dates Section (লিংক জমার তারিখসমূহ) -->
+              <div class="bg-slate-950/80 border border-slate-800/80 p-4 rounded-2xl space-y-3">
+                <div class="flex items-center justify-between">
+                  <h4 class="text-xs font-bold text-emerald-400 uppercase tracking-wide flex items-center gap-1.5">
+                    <i data-lucide="calendar-check" class="w-4 h-4 text-emerald-400"></i>
+                    লিংক জমা দেওয়ার তারিখসমূহ (Active Dates)
+                  </h4>
+                  <span class="text-xs font-mono font-bold text-emerald-400 bg-emerald-500/10 px-2.5 py-0.5 rounded-lg border border-emerald-500/20">
+                    মোট ${activeLogs.length} দিন জমা
+                  </span>
+                </div>
+
+                ${activeLogs.length > 0 ? `
+                  <div class="flex flex-wrap gap-2 max-h-44 overflow-y-auto pr-1">
+                    ${activeLogs.map(l => {
+                      const banglaFormatted = formatLogDate(l.activity_date);
+                      return `
+                        <div class="flex items-center gap-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border border-emerald-500/25 px-3 py-1.5 rounded-xl text-xs font-mono font-bold shadow-sm transition">
+                          <i data-lucide="check-circle-2" class="w-3.5 h-3.5 text-emerald-400"></i>
+                          <span>${l.activity_date}</span>
+                          <span class="text-[10px] text-emerald-400/80 font-normal font-sans">(${banglaFormatted})</span>
+                        </div>
+                      `;
+                    }).join('')}
+                  </div>
+                ` : `
+                  <p class="text-xs text-slate-500 italic py-2">এই মেম্বার এখনো কোনো তারিখে লিংক জমা দেননি।</p>
+                `}
               </div>
 
               <!-- Quick Action Bar -->
@@ -3354,9 +3385,12 @@ function downloadMemberReportCardPng(memberId) {
     const allBadges = getBadges().filter(b => b.member_id === memberId);
 
     // Create custom offscreen rendering element for pristine PNG export
+    const allLogs = getActivityLogs().filter(l => l.member_id === member.id && l.is_active);
+    const activeDatesList = allLogs.map(l => l.activity_date).slice(0, 10);
+
     const container = document.createElement('div');
     container.style.position = 'fixed';
-    container.style.top = '0px';
+    container.style.top = '-9999px';
     container.style.left = '-9999px';
     container.style.width = '760px';
     container.style.height = 'auto';
@@ -3438,6 +3472,23 @@ function downloadMemberReportCardPng(memberId) {
                 <span style="color: #64748b;">Last Active Date:</span>
                 <span style="font-weight: 700; font-family: monospace; color: #e2e8f0;">${member.last_active_date || 'N/A'}</span>
               </div>
+            </div>
+
+            <!-- Active Dates Summary -->
+            <div style="margin-top: 14px;">
+              <p style="font-size: 10px; font-weight: 700; color: #34d399; text-transform: uppercase; margin: 0 0 6px 0;">
+                ✓ Submitted Link Dates (${allLogs.length})
+              </p>
+              ${activeDatesList.length > 0 ? `
+                <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+                  ${activeDatesList.map(d => `
+                    <span style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); padding: 2px 6px; border-radius: 6px; font-size: 9px; font-weight: 700; color: #6ee7b7; font-family: monospace;">${d}</span>
+                  `).join('')}
+                  ${allLogs.length > 10 ? `<span style="font-size: 9px; color: #64748b; font-family: monospace; padding-top: 2px;">+${allLogs.length - 10} more</span>` : ''}
+                </div>
+              ` : `
+                <p style="font-size: 10px; color: #64748b; font-style: italic; margin: 0;">No active submissions recorded</p>
+              `}
             </div>
           </div>
 

@@ -551,33 +551,44 @@ export function recalculateAllMemberStatsFromLogs(explicitLogs = null, membersLi
         consecutiveInactiveDays = 0;
       }
     } else {
-      if (allSubmissionDates.length === 0 || !latestTrackedDate) {
+      if (allSubmissionDates.length === 0) {
         consecutiveInactiveDays = 0;
         status = 'active';
-      } else if (activeDates.has(latestTrackedDate)) {
+      } else if (latestTrackedDate && activeDates.has(latestTrackedDate)) {
+        // Submitted on the most recent tracking date -> 0 days inactive
         consecutiveInactiveDays = 0;
         status = 'active';
       } else {
-        // Count consecutive submission dates backwards from latestTrackedDate where the member was NOT active
-        for (let i = allSubmissionDates.length - 1; i >= 0; i--) {
-          const d = allSubmissionDates[i];
-          if (member.created_at) {
-            const joinDate = member.created_at.split('T')[0];
-            if (d < joinDate) {
-              // Member had not joined yet on this submission date
+        // Member did not submit on the latest tracked date
+        // 1. Calculate missed submission rounds in system backwards from latestTrackedDate
+        let missedRounds = 0;
+        if (latestTrackedDate) {
+          for (let i = allSubmissionDates.length - 1; i >= 0; i--) {
+            const d = allSubmissionDates[i];
+            if (!activeDates.has(d)) {
+              missedRounds++;
+            } else {
               break;
             }
           }
-          if (!activeDates.has(d)) {
-            consecutiveInactiveDays++;
-          } else {
-            // Reached member's most recent active submission date, stop counting
-            break;
-          }
         }
 
-        // Determine status for non-frozen members based on missed submission rounds
-        // Rule: Only members missing >= 3 submission days are considered inactive
+        // 2. Calculate calendar days since last active date
+        let calendarInactiveDays = 0;
+        const refDate = latestTrackedDate || new Date().toISOString().split('T')[0];
+        if (lastActiveDate) {
+          calendarInactiveDays = getDiffDays(refDate, lastActiveDate);
+        } else if (allSubmissionDates.length > 0) {
+          // Never submitted in any recorded rounds
+          const earliestDate = allSubmissionDates[0];
+          calendarInactiveDays = Math.max(getDiffDays(refDate, earliestDate) + 1, allSubmissionDates.length);
+        }
+
+        // Inactivity is the maximum of missed submission rounds and calendar days
+        consecutiveInactiveDays = Math.max(missedRounds, calendarInactiveDays, 1);
+
+        // Determine status for non-frozen members
+        // Rule: 3+ days inactive = inactive, 7+ days = warning, 12+ days = inactive/critical
         if (consecutiveInactiveDays >= 12) {
           status = 'inactive';
         } else if (consecutiveInactiveDays >= 7) {
