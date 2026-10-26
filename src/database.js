@@ -504,6 +504,25 @@ export function findMatchingMember(rawName, membersList) {
   });
   if (match) return { member: match, confidence: 'high', type: 'normalized' };
 
+  // INTERIM PATCH v2 2026-10-25: ultra collisions with different
+  // normalized names are DISTINCT members (e.g. "Šk Ãntor" vs
+  // "Sk Antor"). Do not auto-pick the first one — that credits one
+  // member's link to the other and leaves the other looking inactive
+  // for weeks (the 53-day case). Exact/normalized already returned
+  // above; if we reach here the match is ambiguous, so return null
+  // for manual resolution instead of misattributing it.
+  {
+    const ultraMatches = membersList.filter(m => {
+      const mUltra = getUltraNormalizedName(m.name);
+      const mDispUltra = getUltraNormalizedName(m.display_name || '');
+      return mUltra === ultra || mDispUltra === ultra;
+    });
+    if (ultraMatches.length > 1) {
+      const distinctNorm = new Set(ultraMatches.map(m => getNormalizedName(m.name)));
+      if (distinctNorm.size > 1) return null;
+    }
+  }
+
   // Tier 3: Ultra-normalized match (strips dots, punctuation, diacritics, fancy characters)
   if (ultra.length >= 2) {
     match = membersList.find(m => {

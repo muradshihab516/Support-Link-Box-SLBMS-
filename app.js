@@ -3873,6 +3873,7 @@ function openSubmissionPreviewFlow(rawText, resolvedText, resolvedDuplicates = [
                 if (idx !== -1) {
                   members[idx].status = 'active';
                   members[idx].consecutive_inactive_days = 0;
+                  members[idx].unfrozen_at = state.bulkInputDate;
                   members[idx].updated_at = new Date().toISOString();
                 }
               });
@@ -4922,6 +4923,7 @@ Generated on: ${new Date().toLocaleString()}
               if (idx !== -1) {
                 members[idx].status = 'frozen';
                 members[idx].consecutive_inactive_days = 0;
+                delete members[idx].unfrozen_at;
                 members[idx].updated_at = new Date().toISOString();
                 frozenNames.push(members[idx].name);
               }
@@ -5758,6 +5760,10 @@ function bindLoginEvents() {
           const newStatus = isCurrentlyFrozen ? 'active' : 'frozen';
           members[mIdx].status = newStatus;
           if (newStatus === 'frozen') {
+            members[mIdx].consecutive_inactive_days = 0;
+            delete members[mIdx].unfrozen_at;
+          } else {
+            members[mIdx].unfrozen_at = new Date().toISOString().split('T')[0];
             members[mIdx].consecutive_inactive_days = 0;
           }
           members[mIdx].updated_at = new Date().toISOString();

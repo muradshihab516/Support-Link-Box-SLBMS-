@@ -24,10 +24,12 @@ export function handleAddMember(rawName, notes = '') {
   }
 
   const members = getMembers();
+  // INTERIM PATCH v2: DISTINCT fancy/diacritic spellings are DISTINCT
+  // members (e.g. "Šk Ãntor" vs "Sk Antor" per Shuvo). Ultra equality
+  // must NOT block adding the second one. Only normalized equality blocks.
   const duplicate = members.find(m => {
     const norm = getNormalizedName(cleaned);
-    const ultra = getUltraNormalizedName(cleaned);
-    return getNormalizedName(m.name) === norm || getUltraNormalizedName(m.name) === ultra;
+    return getNormalizedName(m.name) === norm;
   });
 
   if (duplicate) {
@@ -101,10 +103,10 @@ export function handleBulkAddMembers(namesList) {
     const cleaned = cleanName(rawName);
     if (!cleaned) return;
     
+    // INTERIM PATCH v2: see single-add above — ultra must not block.
     const duplicate = members.find(m => {
       const norm = getNormalizedName(cleaned);
-      const ultra = getUltraNormalizedName(cleaned);
-      return getNormalizedName(m.name) === norm || getUltraNormalizedName(m.name) === ultra;
+      return getNormalizedName(m.name) === norm;
     });
 
     if (duplicate) {
@@ -317,13 +319,15 @@ export function analyzeUnregisteredDuplicates(text) {
     }
   });
   
+  // INTERIM PATCH v2: group by normalized, NOT ultra. Two distinct
+  // spellings appearing once each are NOT a duplicate.
   const frequencies = {};
   unregisteredOccurrences.forEach(name => {
-    const ultra = getUltraNormalizedName(name);
-    if (!frequencies[ultra]) {
-      frequencies[ultra] = { name, count: 0 };
+    const normKey = getNormalizedName(name);
+    if (!frequencies[normKey]) {
+      frequencies[normKey] = { name, count: 0 };
     }
-    frequencies[ultra].count++;
+    frequencies[normKey].count++;
   });
   
   const duplicates = [];
@@ -383,13 +387,15 @@ export function analyzeAllDuplicates(text) {
     });
   }
   
+  // INTERIM PATCH v2: group by normalized, NOT ultra. Two distinct
+  // spellings appearing once each are NOT a duplicate.
   const frequencies = {};
   allParsedNames.forEach(name => {
-    const ultra = getUltraNormalizedName(name);
-    if (!frequencies[ultra]) {
-      frequencies[ultra] = { name, count: 0 };
+    const normKey = getNormalizedName(name);
+    if (!frequencies[normKey]) {
+      frequencies[normKey] = { name, count: 0 };
     }
-    frequencies[ultra].count++;
+    frequencies[normKey].count++;
   });
   
   const duplicates = [];
@@ -478,6 +484,25 @@ export function checkAndAssignBadges(member, longestStreak, totalPoints, badges)
   return { badges: newBadges, updated };
 }
 
+// INTERIM PATCH 2026-10-25 (freeze fix, kept in v2):
+// Unfreeze baseline: a member unfrozen on date X must be counted
+// from X, not from their last active date before the freeze.
+// Stored as member.unfrozen_at (set by app.js). For members already
+// unfrozen before this patch, fall back to the latest
+// UNFREEZE_MEMBER audit trail for that name.
+function getUnfreezeBaselineDate(member) {
+  if (member.unfrozen_at) return member.unfrozen_at;
+  try {
+    const trails = getAuditTrails();
+    const matches = trails.filter(t => t && t.action === 'UNFREEZE_MEMBER' && t.description && String(t.description).includes(member.name));
+    if (matches.length > 0) {
+      matches.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+      return String(matches[0].timestamp).split('T')[0];
+    }
+  } catch (e) {}
+  return null;
+}
+
 // Master Recalculation Engine — derives 100% of member stats from activity logs
 export function recalculateAllMemberStatsFromLogs(explicitLogs = null, membersList = null, badgesList = null) {
   const logs = explicitLogs || getActivityLogs();
@@ -507,6 +532,8 @@ export function recalculateAllMemberStatsFromLogs(explicitLogs = null, membersLi
     const totalPoints = activeLogs.reduce((sum, l) => sum + (l.points_earned !== undefined ? l.points_earned : CONFIG.POINTS.DAILY_ACTIVITY), 0);
     const level = calculateLevel(totalPoints);
     const lastActiveDate = sortedActiveDates.length > 0 ? sortedActiveDates[sortedActiveDates.length - 1] : null;
+    const unfreezeDate = getUnfreezeBaselineDate(member);
+    const effectiveLastActiveDate = (unfreezeDate && (!lastActiveDate || unfreezeDate > lastActiveDate)) ? unfreezeDate : lastActiveDate;
 
     // Calculate Longest Streak
     let longestStreak = 0;
@@ -546,6 +573,7 @@ export function recalculateAllMemberStatsFromLogs(explicitLogs = null, membersLi
       if (latestTrackedDate && activeDates.has(latestTrackedDate)) {
         status = 'active';
         consecutiveInactiveDays = 0;
+        member.unfrozen_at = latestTrackedDate;
       } else {
         status = 'frozen';
         consecutiveInactiveDays = 0;
@@ -565,6 +593,7 @@ export function recalculateAllMemberStatsFromLogs(explicitLogs = null, membersLi
         if (latestTrackedDate) {
           for (let i = allSubmissionDates.length - 1; i >= 0; i--) {
             const d = allSubmissionDates[i];
+            if (unfreezeDate && d <= unfreezeDate) break;
             if (!activeDates.has(d)) {
               missedRounds++;
             } else {
@@ -576,8 +605,8 @@ export function recalculateAllMemberStatsFromLogs(explicitLogs = null, membersLi
         // 2. Calculate calendar days since last active date
         let calendarInactiveDays = 0;
         const refDate = latestTrackedDate || new Date().toISOString().split('T')[0];
-        if (lastActiveDate) {
-          calendarInactiveDays = getDiffDays(refDate, lastActiveDate);
+        if (effectiveLastActiveDate) {
+          calendarInactiveDays = getDiffDays(refDate, effectiveLastActiveDate);
         } else if (allSubmissionDates.length > 0) {
           // Never submitted in any recorded rounds
           const earliestDate = allSubmissionDates[0];
@@ -585,7 +614,9 @@ export function recalculateAllMemberStatsFromLogs(explicitLogs = null, membersLi
         }
 
         // Inactivity is the maximum of missed submission rounds and calendar days
-        consecutiveInactiveDays = Math.max(missedRounds, calendarInactiveDays, 1);
+        consecutiveInactiveDays = unfreezeDate
+          ? Math.max(missedRounds, calendarInactiveDays)
+          : Math.max(missedRounds, calendarInactiveDays, 1);
 
         // Determine status for non-frozen members
         // Rule: 3+ days inactive = inactive, 7+ days = warning, 12+ days = inactive/critical
