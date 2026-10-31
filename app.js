@@ -3915,7 +3915,20 @@ function openSubmissionPreviewFlow(rawText, resolvedText, resolvedDuplicates = [
       }
     };
 
-    proceedWithSubmission();
+    // INTERIM PATCH v3: warn before replacing an already-submitted date.
+    const existingForDate = getActivityLogs().filter(l => l.activity_date === state.bulkInputDate);
+    if (existingForDate.length > 0) {
+      showConfirm(
+        `এই তারিখে (${state.bulkInputDate}) আগেই ${existingForDate.length}টি লগ আছে। আবার submit করলে আগের list মুছে নতুন list বসবে। আপনি কি নিশ্চিতভাবে এগোতে চান?`,
+        () => { proceedWithSubmission(); },
+        null,
+        'আগের Submission আছে',
+        'হ্যাঁ, আবার Submit করুন',
+        'বাতিল করুন'
+      );
+    } else {
+      proceedWithSubmission();
+    }
   };
 
   const onCancel = () => {
@@ -4520,9 +4533,27 @@ Generated on: ${new Date().toLocaleString()}
 
         showConfirm(
           `আপনি কি সত্যিই "${member.name}" কে গ্রুপ ডাটাবেজ থেকে মুছে ফেলতে চান? এটি রিভার্স করা যাবে না!`,
-          () => {
+          async () => {
+            // INTERIM PATCH v3: delete remote first, so Smart Sync cannot
+            // resurrect this member. Abort (keep local data) on remote error.
+            try {
+              const client = getSupabase();
+              if (client) {
+                const delLogs = await client.from('activity_logs').delete().eq('member_id', memberId);
+                if (delLogs.error) throw new Error(delLogs.error.message);
+                const delBadges = await client.from('badges').delete().eq('member_id', memberId);
+                if (delBadges.error) throw new Error(delBadges.error.message);
+                const delMember = await client.from('members').delete().eq('id', memberId);
+                if (delMember.error) throw new Error(delMember.error.message);
+              }
+            } catch (err) {
+              showToast(`মেম্বার মুছতে ব্যর্থ হয়েছে: ${err.message}`, 'error');
+              return;
+            }
             const filtered = members.filter(m => m.id !== memberId);
             saveMembers(filtered);
+            saveActivityLogs(getActivityLogs().filter(l => l.member_id !== memberId));
+            saveBadges(getBadges().filter(b => b.member_id !== memberId));
 
             // Audit trail log
             const trails = getAuditTrails();
@@ -4537,6 +4568,7 @@ Generated on: ${new Date().toLocaleString()}
             });
             saveAuditTrails(trails);
 
+            recalculateAllMemberStatsFromLogs();
             loadStateFromStorage();
             updateState({});
             showToast(`"${member.name}" কে ডাটাবেজ থেকে মুছে ফেলা হয়েছে!`, 'success');
@@ -5141,20 +5173,43 @@ Generated on: ${new Date().toLocaleString()}
       const submitBtn = document.getElementById('dev-password-submit-btn');
       const errEl = document.getElementById('dev-password-error');
       
-      const attemptUnlock = () => {
-        if (passInp) {
-          const pass = passInp.value.trim();
-          if (pass === 'Sm.Shihab211' || pass.toLowerCase() === 'sm.shihab211' || pass.toLowerCase() === 'shihab211') {
-            sessionStorage.setItem('developer_unlocked', 'true');
-            updateState({ developerUnlocked: true });
-          } else {
-            if (errEl) {
-              errEl.textContent = 'ভুল পাসওয়ার্ড! অনুগ্রহ করে আবার চেষ্টা করুন।';
-              errEl.classList.remove('hidden');
-            }
-            passInp.value = '';
-            passInp.focus();
+      const attemptUnlock = async () => {
+        if (!passInp) return;
+        const pass = passInp.value.trim();
+        const showGateError = () => {
+          if (errEl) {
+            errEl.textContent = 'ভুল পাসওয়ার্ড! অনুগ্রহ করে আবার চেষ্টা করুন।';
+            errEl.classList.remove('hidden');
           }
+          passInp.value = '';
+          passInp.focus();
+        };
+        if (!pass) { showGateError(); return; }
+        // INTERIM PATCH v3: no hardcoded developer password. Unlock only by
+        // re-checking the currently logged-in admin's own password, via
+        // Supabase Auth first, then the admins-table password.
+        const adminEmail = (typeof state !== 'undefined' && state.currentAdminEmail) || getCurrentAdmin();
+        let unlocked = false;
+        try {
+          const client = getSupabase();
+          if (client && adminEmail) {
+            const authRes = await client.auth.signInWithPassword({ email: adminEmail, password: pass });
+            if (!authRes.error && authRes.data && authRes.data.user) {
+              unlocked = true;
+            } else {
+              const res = await client.from('admins').select('*').eq('email', adminEmail);
+              if (!res.error && res.data && res.data.length > 0) {
+                const dbPass = res.data[0].password || res.data[0].pass;
+                if (dbPass && String(dbPass).trim() === pass) unlocked = true;
+              }
+            }
+          }
+        } catch (e) { unlocked = false; }
+        if (unlocked) {
+          sessionStorage.setItem('developer_unlocked', 'true');
+          updateState({ developerUnlocked: true });
+        } else {
+          showGateError();
         }
       };
 
@@ -5641,13 +5696,10 @@ function bindLoginEvents() {
           }
         }
 
-        const isPredefinedAdmin = Object.keys(ADMIN_NAMES).includes(email);
-        const isDefaultPassword = ['linkbox123', '123456', 'admin123', 'SLBAD220'].includes(password);
         
-        if (!success && isPredefinedAdmin && isDefaultPassword) {
-          success = true;
-        }
 
+        // INTERIM PATCH v3: login requires Supabase Auth or the admins-table
+        // password. No hardcoded fallback remains.
         if (success) {
           localStorage.setItem('support_linkbox_logged_in', 'true');
           setCurrentAdmin(email);

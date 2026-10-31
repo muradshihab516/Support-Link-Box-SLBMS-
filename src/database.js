@@ -535,16 +535,17 @@ export function findMatchingMember(rawName, membersList) {
 
   // Tier 4: Canonical Honorific & Spelling Match (e.g. "Mohammad Shakil" <-> "Md. Shakil")
   if (canon.length >= 3) {
-    match = membersList.find(m => {
+    const canonMatches = membersList.filter(m => {
       const mCanon = getCanonicalNormalizedString(m.name);
       const mDispCanon = getCanonicalNormalizedString(m.display_name || '');
       return mCanon === canon || mDispCanon === canon;
     });
-    if (match) return { member: match, confidence: 'high', type: 'canonical' };
+    if (canonMatches.length === 1) return { member: canonMatches[0], confidence: 'high', type: 'canonical' };
+    if (canonMatches.length > 1) return null;
   }
 
   // Tier 5: Aliases match (check exact, normalized, ultra, and canonical across all aliases)
-  match = membersList.find(m => {
+  const aliasMatches = membersList.filter(m => {
     if (Array.isArray(m.aliases)) {
       return m.aliases.some(alias => {
         if (!alias) return false;
@@ -558,7 +559,8 @@ export function findMatchingMember(rawName, membersList) {
     }
     return false;
   });
-  if (match) return { member: match, confidence: 'high', type: 'alias' };
+  if (aliasMatches.length > 1) return null;
+  if (aliasMatches.length === 1) return { member: aliasMatches[0], confidence: 'high', type: 'alias' };
 
   // Tier 6: Core Token Subset & Permutation Match
   // E.g. Candidate: "Jakaria Hosain" -> Member: "MD. Jakaria Hossain"
@@ -585,6 +587,7 @@ export function findMatchingMember(rawName, membersList) {
       }
     });
 
+    if (candidateMatches.length > 1) return null;
     if (candidateMatches.length === 1) {
       return { member: candidateMatches[0].member, confidence: 'high', type: 'token_subset' };
     }
@@ -610,6 +613,21 @@ export function findMatchingMember(rawName, membersList) {
     }
   });
 
+  // INTERIM PATCH v3: fuzzy auto-credit only when exactly one member
+  // reaches the threshold. Two close names must go to manual resolution.
+  const fuzzyMatches = membersList.filter(m => {
+    const s1 = calculateNameSimilarity(cleaned, m.name);
+    const s2 = m.display_name ? calculateNameSimilarity(cleaned, m.display_name) : 0;
+    let sAlias = 0;
+    if (Array.isArray(m.aliases)) {
+      m.aliases.forEach(a => {
+        const s = calculateNameSimilarity(cleaned, a);
+        if (s > sAlias) sAlias = s;
+      });
+    }
+    return Math.max(s1, s2, sAlias) >= 0.86;
+  });
+  if (fuzzyMatches.length > 1) return null;
   if (bestFuzzy && highestScore >= 0.86) {
     return { member: bestFuzzy, confidence: 'fuzzy_high', type: 'fuzzy_auto' };
   }

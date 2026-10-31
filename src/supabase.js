@@ -559,16 +559,8 @@ export async function performSmartSync(silent = true) {
     const rBadges = (remoteB.data || []).map(item => mapDbToLocal('badges', item)).filter(Boolean);
     const rAudits = (remoteA.data || []).map(item => mapDbToLocal('audit_trails', item)).filter(Boolean);
 
-    // Production wipe for remote test activity logs
-    if (localStorage.getItem('support_linkbox_remote_test_logs_purged_v2') !== 'done') {
-      try {
-        await client.from('activity_logs').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-        rLogs = [];
-        localStorage.setItem('support_linkbox_remote_test_logs_purged_v2', 'done');
-      } catch (purgeErr) {
-        console.warn('Remote test logs purge skipped:', purgeErr);
-      }
-    }
+    // INTERIM PATCH v3: remote test-log purge REMOVED. Never delete
+    // activity_logs on sync; a fresh browser must not wipe real logs.
 
     const localMembers = getMembers();
     const localLogs = getActivityLogs();
